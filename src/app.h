@@ -36,6 +36,10 @@ public:
     // Places the whole document in view.
     void zoomToFit();
 
+    // The camera number under a screen point, or 0 - the page asks this on a
+    // double click to open that camera's video.
+    int cameraNumberAtScreen(float sx, float sy) const;
+
     // History.  Call pushHistory before mutating from outside (the panel
     // setters); a repeated tag coalesces a slider's stream of edits into one
     // undo step.  Gestures inside the app push for themselves.

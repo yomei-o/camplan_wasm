@@ -116,6 +116,11 @@ void App::setMode(Mode m) {
     dirty_ = true;
 }
 
+int App::cameraNumberAtScreen(float sx, float sy) const {
+    const int hit = hitCamera(worldX(sx), worldY(sy));
+    return hit < 0 ? 0 : doc.cameras[hit].number;
+}
+
 void App::pushHistory(const char * tag) {
     if (tag && *tag && historyTag_ == tag) return;   // one step per slider
     historyTag_ = tag ? tag : "";

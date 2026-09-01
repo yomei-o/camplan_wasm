@@ -180,7 +180,7 @@
 </main>
 <footer id="hint">V:選択 C:カメラ W:壁 E:消去 F:全体 Ctrl+Z:戻す Ctrl+Y:やり直し Del:削除 / 追加: クリック→ドラッグで向き / 壁: クリックで頂点、Enterで確定 / ホイール: ズーム</footer>
 
-<script src="camplan.js?v=20260901044604"></script>
+<script src="camplan.js?v=20260901045921"></script>
 <script>
 createCamplan().then(function (M) {
   'use strict';
@@ -333,6 +333,19 @@ createCamplan().then(function (M) {
     e.preventDefault();
   }, { passive: false });
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  // A double click on a camera hands its number to the page - the hook for
+  // opening that camera's live video.  Replace window.onCameraOpen (or listen
+  // for the 'camplan:camera' event) to wire in the real player.
+  canvas.addEventListener('dblclick', function (e) {
+    var p = pos(e);
+    var no = M._cp_camera_at(p[0], p[1]);
+    if (!no) return;
+    window.dispatchEvent(new CustomEvent('camplan:camera',
+                                         { detail: { number: no } }));
+    if (window.onCameraOpen) window.onCameraOpen(no);
+    else alert('カメラ ' + no + ' の映像を表示（ここにプレーヤーを接続）');
+    e.preventDefault();
+  });
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT') return;
     if (e.ctrlKey || e.metaKey) {

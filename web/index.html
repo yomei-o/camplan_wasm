@@ -333,6 +333,19 @@ createCamplan().then(function (M) {
     e.preventDefault();
   }, { passive: false });
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  // A double click on a camera hands its number to the page - the hook for
+  // opening that camera's live video.  Replace window.onCameraOpen (or listen
+  // for the 'camplan:camera' event) to wire in the real player.
+  canvas.addEventListener('dblclick', function (e) {
+    var p = pos(e);
+    var no = M._cp_camera_at(p[0], p[1]);
+    if (!no) return;
+    window.dispatchEvent(new CustomEvent('camplan:camera',
+                                         { detail: { number: no } }));
+    if (window.onCameraOpen) window.onCameraOpen(no);
+    else alert('カメラ ' + no + ' の映像を表示（ここにプレーヤーを接続）');
+    e.preventDefault();
+  });
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT') return;
     if (e.ctrlKey || e.metaKey) {

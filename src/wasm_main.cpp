@@ -59,6 +59,9 @@ EMSCRIPTEN_KEEPALIVE void cp_set_marker(float r) {
     g_app.markDirty();
 }
 EMSCRIPTEN_KEEPALIVE float cp_get_marker(void) { return g_app.doc.markerSize; }
+EMSCRIPTEN_KEEPALIVE int cp_camera_at(float x, float y) {
+    return g_app.cameraNumberAtScreen(x, y);
+}
 EMSCRIPTEN_KEEPALIVE void cp_undo(void) { g_app.undo(); }
 EMSCRIPTEN_KEEPALIVE void cp_redo(void) { g_app.redo(); }
 
