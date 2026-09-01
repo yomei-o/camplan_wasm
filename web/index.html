@@ -372,7 +372,8 @@ createCamplan().then(function (M) {
   });
 
   /* -------------------------------------------------------- background */
-  function loadImageFile(file) {
+  function loadImageFile(file, name) {
+    var fileName = name || file.name;
     var url = URL.createObjectURL(file);
     var img = new Image();
     img.onload = function () {
@@ -508,6 +509,14 @@ createCamplan().then(function (M) {
     requestAnimationFrame(frame);
   }
   M._cp_set_theme(0);
+  // The demo plan, so the first visit has something to point cameras at.
+  // A failure (file://, offline) just leaves the graph paper.
+  fetch('cocololo.jpg').then(function (r) {
+    return r.ok ? r.blob() : null;
+  }).then(function (blob) {
+    if (blob && !M._cp_camera_count() && !M._cp_bg_size())
+      loadImageFile(blob, 'cocololo.jpg');
+  }).catch(function () {});
   requestAnimationFrame(frame);
 });
 </script>

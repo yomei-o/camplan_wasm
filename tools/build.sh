@@ -18,6 +18,7 @@ EMCC="${EMCC:-emcc}"
 # A browser happily keeps yesterday's camplan.js under today's index.html,
 # and the mismatch surfaces as 'M._cp_xxx is not a function'.  A new build is
 # a new URL, so it can never come out of the cache.
+cp web/cocololo.jpg docs/cocololo.jpg
 V="$(date -u '+%Y%m%d%H%M%S')"
 sed "s/src=\"camplan.js\"/src=\"camplan.js?v=$V\"/" web/index.html > docs/index.html
 echo "built docs/camplan.js + docs/index.html (v=$V)"
