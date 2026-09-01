@@ -36,6 +36,13 @@ public:
     // Places the whole document in view.
     void zoomToFit();
 
+    // History.  Call pushHistory before mutating from outside (the panel
+    // setters); a repeated tag coalesces a slider's stream of edits into one
+    // undo step.  Gestures inside the app push for themselves.
+    void pushHistory(const char * tag = "");
+    void undo();
+    void redo();
+
     // True when something changed since the last render() - the host only
     // repaints then.
     bool dirty() const { return dirty_; }
@@ -62,6 +69,14 @@ private:
     float lastX_ = 0.f, lastY_ = 0.f;     // screen, for panning
     float downX_ = 0.f, downY_ = 0.f;     // screen, to tell a click from a pan
     std::vector<float> pendingWall_;      // world, the polyline being drawn
+    struct Snapshot {
+        std::vector<Camera> cameras;
+        std::vector<Wall> walls;
+        float markerSize;
+    };
+    std::vector<Snapshot> undo_;
+    std::vector<Snapshot> redo_;
+    std::string historyTag_;
     float hoverX_ = 0.f, hoverY_ = 0.f;   // world, for the wall preview
     bool dirty_ = true;
 

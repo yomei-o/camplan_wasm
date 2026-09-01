@@ -83,6 +83,25 @@ createCamplan().then((M) => {
     numbers.sort((a, b) => a - b);
     if (numbers.join() !== '1,3,20') throw new Error('numbers ' + numbers);
 
+    // Undo: deleting the selected camera comes back with Ctrl+Z.
+    M._cp_select_number(20);
+    M._cp_delete_selected();
+    if (M._cp_camera_count() !== 2) throw new Error('delete');
+    M._cp_undo();
+    if (M._cp_camera_count() !== 3) throw new Error('undo delete');
+    M._cp_redo();
+    if (M._cp_camera_count() !== 2) throw new Error('redo delete');
+    M._cp_undo();
+
+    // A slider's stream of edits is one undo step.
+    M._cp_select_number(20);
+    const fov0 = M._cp_sel_fov();
+    M._cp_sel_set_fov(130); M._cp_sel_set_fov(140); M._cp_sel_set_fov(150);
+    M._cp_undo();
+    M._cp_select_number(20);
+    if (Math.abs(M._cp_sel_fov() - fov0) > 0.5)
+        throw new Error('undo slider: ' + M._cp_sel_fov());
+
     const ex = M._cp_export_render();
     writeBmp('node_export.bmp',
              Buffer.from(M.HEAPU8.buffer, ex, M._cp_export_w() *

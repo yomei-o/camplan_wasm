@@ -186,6 +186,8 @@ struct Parser {
 
 std::string Document::toJson() const {
     std::string out = "{\"app\":\"camplan\",\"version\":1";
+    out += ",\"marker\":";
+    appendNumber(out, markerSize);
     if (background) {
         out += ",\"background\":{\"name\":";
         appendString(out, background->name);
@@ -234,7 +236,11 @@ bool Document::fromJson(const std::string & text) {
         std::string key;
         if (!in.string(key)) break;
         if (!in.eat(':')) return false;
-        if (key == "app") {
+        if (key == "marker") {
+            float v;
+            if (!in.number(v)) return false;
+            loaded.markerSize = std::min(std::max(v, 6.f), 80.f);
+        } else if (key == "app") {
             std::string v;
             if (!in.string(v) || v != "camplan") return false;
             sawApp = true;

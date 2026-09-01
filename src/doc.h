@@ -33,6 +33,7 @@ struct Document {
     std::optional<Background> background;
     std::vector<Wall> walls;
     std::vector<Camera> cameras;
+    float markerSize = 16;   // the numbered disc's radius, world pixels
 
     int findCamera(int number) const;
     // The lowest free number in 1..99, or 0 when all are taken.

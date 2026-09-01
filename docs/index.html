@@ -171,9 +171,14 @@
     <div id="noSel">カメラをクリックで選択</div>
     <h2>CAMERAS</h2>
     <div id="camList"></div>
+    <h2>DISPLAY</h2>
+    <div class="props">
+      <label>マーカー</label><input type="range" id="pMarker" min="6" max="80" step="1">
+      <label></label><input type="number" id="pMarkerN" min="6" max="80" step="1">
+    </div>
   </aside>
 </main>
-<footer id="hint">左ドラッグ: 移動 / 空白ドラッグ: パン / ホイール: ズーム / 追加モード: クリック→そのままドラッグで向きを決める / 壁モード: クリックで頂点、Enterか右クリックで確定</footer>
+<footer id="hint">V:選択 C:カメラ W:壁 E:消去 F:全体 Ctrl+Z:戻す Ctrl+Y:やり直し Del:削除 / 追加: クリック→ドラッグで向き / 壁: クリックで頂点、Enterで確定 / ホイール: ズーム</footer>
 
 <script src="camplan.js"></script>
 <script>
@@ -243,6 +248,9 @@ createCamplan().then(function (M) {
       chip.onclick = function () { M._cp_select_number(num); panelStale = true; };
       camList.appendChild(chip);
     });
+    var marker = Math.round(M._cp_get_marker());
+    pMarker.value = marker;
+    if (document.activeElement !== pMarkerN) pMarkerN.value = marker;
     panelStale = false;
   }
 
@@ -258,6 +266,14 @@ createCamplan().then(function (M) {
   pFovN.onchange = function () { setFov(pFovN.value); };
   pRange.oninput = function () { setRange(pRange.value); };
   pRangeN.onchange = function () { setRange(pRangeN.value); };
+  var pMarker = document.getElementById('pMarker');
+  var pMarkerN = document.getElementById('pMarkerN');
+  function setMarker(v) {
+    M._cp_set_marker(parseFloat(v) || 16);
+    panelStale = true;
+  }
+  pMarker.oninput = function () { setMarker(pMarker.value); };
+  pMarkerN.onchange = function () { setMarker(pMarkerN.value); };
   document.getElementById('delBtn').onclick = function () {
     M._cp_delete_selected();
     panelStale = true;
@@ -271,6 +287,7 @@ createCamplan().then(function (M) {
   });
   function setMode(i) {
     M._cp_set_mode(i);
+    shownMode = i;
     modeButtons.forEach(function (b, k) {
       b.classList.toggle('on', k === i);
     });
@@ -318,6 +335,21 @@ createCamplan().then(function (M) {
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT') return;
+    if (e.ctrlKey || e.metaKey) {
+      var k = e.key.toLowerCase();
+      if (k === 'z' && e.shiftKey) { M._cp_redo(); }
+      else if (k === 'z') { M._cp_undo(); }
+      else if (k === 'y') { M._cp_redo(); }
+      else if (k === 's') { document.getElementById('save').click(); }
+      else return;
+      panelStale = true;
+      e.preventDefault();
+      return;
+    }
+    var modes = { v: 0, '1': 0, c: 1, '2': 1, w: 2, '3': 2, e: 3, '4': 3 };
+    var k = e.key.toLowerCase();
+    if (k in modes) { setMode(modes[k]); return; }
+    if (k === 'f') { M._cp_zoom_fit(); return; }
     var codes = { Delete: 46, Backspace: 8, Enter: 13, Escape: 27 };
     if (codes[e.key]) {
       M._cp_key(codes[e.key]);
@@ -446,8 +478,14 @@ createCamplan().then(function (M) {
   };
 
   /* -------------------------------------------------------------- loop */
+  var shownMode = 0;
   function frame() {
     fit();
+    var m = M._cp_get_mode();
+    if (m !== shownMode) {
+      shownMode = m;
+      modeButtons.forEach(function (b, k) { b.classList.toggle('on', k === m); });
+    }
     if (M._cp_dirty()) {
       present();
       if (panelStale !== false) refreshPanel();

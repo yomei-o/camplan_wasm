@@ -12,7 +12,6 @@ constexpr float kPi = 3.14159265358979f;
 
 // World-unit sizes, so the drawing keeps its proportions at any zoom and in
 // the export.
-constexpr float kCamRadius = 16.f;      // the numbered disc
 constexpr float kWallWidth = 4.f;
 constexpr float kHandleRadius = 7.f;    // screen pixels - handles are UI
 
@@ -105,6 +104,7 @@ bool App::setSelectedNumber(int number) {
 
 void App::deleteSelected() {
     if (selected_ < 0 || selected_ >= (int)doc.cameras.size()) return;
+    pushHistory();
     doc.cameras.erase(doc.cameras.begin() + selected_);
     selected_ = -1;
     dirty_ = true;
@@ -113,6 +113,40 @@ void App::deleteSelected() {
 void App::setMode(Mode m) {
     if (mode_ == Mode::wall && m != Mode::wall) pendingWall_.clear();
     mode_ = m;
+    dirty_ = true;
+}
+
+void App::pushHistory(const char * tag) {
+    if (tag && *tag && historyTag_ == tag) return;   // one step per slider
+    historyTag_ = tag ? tag : "";
+    undo_.push_back({doc.cameras, doc.walls, doc.markerSize});
+    if (undo_.size() > 100) undo_.erase(undo_.begin());
+    redo_.clear();
+}
+
+void App::undo() {
+    if (undo_.empty()) return;
+    redo_.push_back({doc.cameras, doc.walls, doc.markerSize});
+    const Snapshot & s = undo_.back();
+    doc.cameras = s.cameras;
+    doc.walls = s.walls;
+    doc.markerSize = s.markerSize;
+    undo_.pop_back();
+    selected_ = -1;
+    historyTag_.clear();
+    dirty_ = true;
+}
+
+void App::redo() {
+    if (redo_.empty()) return;
+    undo_.push_back({doc.cameras, doc.walls, doc.markerSize});
+    const Snapshot & s = redo_.back();
+    doc.cameras = s.cameras;
+    doc.walls = s.walls;
+    doc.markerSize = s.markerSize;
+    redo_.pop_back();
+    selected_ = -1;
+    historyTag_.clear();
     dirty_ = true;
 }
 
@@ -129,7 +163,7 @@ void App::zoomToFit() {
 
 int App::hitCamera(float wx, float wy) const {
     // Screen-size forgiveness: at least twelve screen pixels of grab.
-    const float r = std::max(kCamRadius, 12.f / scale_);
+    const float r = std::max(doc.markerSize, 12.f / scale_);
     for (int i = (int)doc.cameras.size() - 1; i >= 0; i--) {
         const Camera & c = doc.cameras[i];
         const float dx = wx - c.x, dy = wy - c.y;
@@ -169,12 +203,13 @@ void App::mouseDown(float x, float y, int button) {
                 const float dx = wx - px, dy = wy - py;
                 return dx * dx + dy * dy <= grab * grab;
             };
-            if (near(ax, ay)) { drag_ = Drag::aimHandle; return; }
-            if (near(eax, eay)) { drag_ = Drag::fovHandleA; return; }
-            if (near(ebx, eby)) { drag_ = Drag::fovHandleB; return; }
+            if (near(ax, ay)) { pushHistory(); drag_ = Drag::aimHandle; return; }
+            if (near(eax, eay)) { pushHistory(); drag_ = Drag::fovHandleA; return; }
+            if (near(ebx, eby)) { pushHistory(); drag_ = Drag::fovHandleB; return; }
         }
         const int hit = hitCamera(wx, wy);
         if (hit >= 0) {
+            pushHistory();
             selected_ = hit;
             drag_ = Drag::moveCamera;
             grabDX_ = doc.cameras[hit].x - wx;
@@ -188,6 +223,7 @@ void App::mouseDown(float x, float y, int button) {
     case Mode::addCamera: {
         const int number = doc.nextNumber();
         if (!number) return;    // all ninety-nine in use
+        pushHistory();
         Camera c;
         c.number = number;
         c.x = wx;
@@ -265,6 +301,13 @@ void App::mouseMove(float x, float y) {
 }
 
 void App::mouseUp(float x, float y, int button) {
+    // Placing a camera is one gesture; the next click almost always wants to
+    // adjust something, so the tool snaps back to select by itself.
+    if (button == 0 && mode_ == Mode::addCamera &&
+        drag_ == Drag::aimHandle) {
+        mode_ = Mode::select;
+        dirty_ = true;
+    }
     if (button == 0 && drag_ == Drag::maybePan &&
         std::fabs(x - downX_) + std::fabs(y - downY_) <= 3.f) {
         selected_ = -1;    // a plain click on nothing
@@ -310,6 +353,7 @@ void App::keyDown(int code) {
 
 void App::finishWall() {
     if (pendingWall_.size() >= 4) {
+        pushHistory();
         Wall wall;
         wall.xy = pendingWall_;
         doc.walls.push_back(std::move(wall));
@@ -321,6 +365,7 @@ void App::finishWall() {
 void App::eraseAt(float wx, float wy) {
     const int hit = hitCamera(wx, wy);
     if (hit >= 0) {
+        pushHistory();
         doc.cameras.erase(doc.cameras.begin() + hit);
         if (selected_ == hit) selected_ = -1;
         else if (selected_ > hit) selected_--;
@@ -340,6 +385,7 @@ void App::eraseAt(float wx, float wy) {
             t = std::min(std::max(t, 0.f), 1.f);
             const float ex = wx - (x0 + t * dx), ey = wy - (y0 + t * dy);
             if (ex * ex + ey * ey > limit * limit) continue;
+            pushHistory();
             // Split the polyline around the removed segment.
             Wall tail;
             tail.xy.assign(xy.begin() + i + 2, xy.end());
@@ -373,8 +419,9 @@ void drawGrid(Canvas & out, float scale, float ox, float oy, const Theme & t) {
     lines(majorStep, t.gridMajor);
 }
 
-void drawCamera(Canvas & out, const Camera & c, bool isSelected, float scale,
-                float ox, float oy, const Theme & t) {
+void drawCamera(Canvas & out, const Camera & c, bool isSelected,
+                float markerSize, float scale, float ox, float oy,
+                const Theme & t) {
     const float sx = c.x * scale + ox;
     const float sy = c.y * scale + oy;
     const float r = c.range * scale;
@@ -396,7 +443,7 @@ void drawCamera(Canvas & out, const Camera & c, bool isSelected, float scale,
              t.aimLine);
 
     // The numbered disc, with a soft glow ring when selected.
-    const float cr = kCamRadius * std::max(scale, 0.45f);
+    const float cr = markerSize * std::max(scale, 0.45f);
     if (isSelected) out.circle(sx, sy, cr + 3.f, 6.f, t.selFanFill);
     out.fillCircle(sx, sy, cr, t.camFill);
     out.circle(sx, sy, cr, 2.2f, isSelected ? t.selRing : t.camRing);
@@ -434,8 +481,8 @@ void App::drawScene(Canvas & out, float scale, float ox, float oy,
     }
 
     for (size_t i = 0; i < doc.cameras.size(); i++)
-        drawCamera(out, doc.cameras[i],
-                   withUi && (int)i == selected_, scale, ox, oy, t);
+        drawCamera(out, doc.cameras[i], withUi && (int)i == selected_,
+                   doc.markerSize, scale, ox, oy, t);
 
     if (!withUi) return;
 

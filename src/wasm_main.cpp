@@ -53,6 +53,14 @@ EMSCRIPTEN_KEEPALIVE void cp_set_theme(int t) {
     g_app.markDirty();
 }
 EMSCRIPTEN_KEEPALIVE void cp_zoom_fit(void) { g_app.zoomToFit(); }
+EMSCRIPTEN_KEEPALIVE void cp_set_marker(float r) {
+    g_app.pushHistory("marker");
+    g_app.doc.markerSize = r < 6 ? 6 : (r > 80 ? 80 : r);
+    g_app.markDirty();
+}
+EMSCRIPTEN_KEEPALIVE float cp_get_marker(void) { return g_app.doc.markerSize; }
+EMSCRIPTEN_KEEPALIVE void cp_undo(void) { g_app.undo(); }
+EMSCRIPTEN_KEEPALIVE void cp_redo(void) { g_app.redo(); }
 
 /* ------------------------------------------------------------- selection */
 
@@ -73,22 +81,26 @@ EMSCRIPTEN_KEEPALIVE float cp_sel_range(void) {
     return c ? c->range : 0;
 }
 EMSCRIPTEN_KEEPALIVE int cp_sel_set_number(int n) {
+    g_app.pushHistory("number");
     return g_app.setSelectedNumber(n) ? 1 : 0;
 }
 EMSCRIPTEN_KEEPALIVE void cp_sel_set_dir(float v) {
     if (cam::Camera * c = g_app.selectedCamera()) {
+        g_app.pushHistory("dir");
         c->dirDeg = v;
         g_app.markDirty();
     }
 }
 EMSCRIPTEN_KEEPALIVE void cp_sel_set_fov(float v) {
     if (cam::Camera * c = g_app.selectedCamera()) {
+        g_app.pushHistory("fov");
         c->fovDeg = v < 10 ? 10 : (v > 359 ? 359 : v);
         g_app.markDirty();
     }
 }
 EMSCRIPTEN_KEEPALIVE void cp_sel_set_range(float v) {
     if (cam::Camera * c = g_app.selectedCamera()) {
+        g_app.pushHistory("range");
         c->range = v < 24 ? 24 : (v > 4000 ? 4000 : v);
         g_app.markDirty();
     }
