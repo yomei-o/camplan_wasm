@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAMPLAN - 防犯カメラ設置図エディタ</title>
+<style>
+  :root {
+    --bg: #060b14;
+    --panel: #0b1424;
+    --line: #123049;
+    --cyan: #00d8ff;
+    --cyan-dim: #0a7fa0;
+    --amber: #ffbe3c;
+    --text: #cfe8f5;
+    --muted: #5f8ba3;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 "Consolas", "Roboto Mono", monospace;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #0c1626, #081020);
+    flex-wrap: wrap;
+  }
+  header .brand {
+    color: var(--cyan);
+    letter-spacing: 3px;
+    font-weight: bold;
+    margin-right: 8px;
+    text-shadow: 0 0 12px rgba(0,216,255,.55);
+  }
+  header .brand small { color: var(--muted); letter-spacing: 0; margin-left: 8px; }
+  button, label.filebtn {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 5px 12px;
+    font: inherit;
+    cursor: pointer;
+    transition: all .12s;
+    user-select: none;
+  }
+  button:hover, label.filebtn:hover {
+    border-color: var(--cyan-dim);
+    color: var(--cyan);
+    box-shadow: 0 0 10px rgba(0,216,255,.22);
+  }
+  button.mode.on {
+    color: #04222c;
+    background: var(--cyan);
+    border-color: var(--cyan);
+    box-shadow: 0 0 14px rgba(0,216,255,.6);
+  }
+  .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #stage { flex: 1; position: relative; min-width: 0; }
+  #stage canvas { position: absolute; inset: 0; outline: none; }
+  #stage.dropping::after {
+    content: "図面画像 / 保存ファイル をドロップ";
+    position: absolute; inset: 12px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px dashed var(--cyan);
+    color: var(--cyan);
+    font-size: 18px;
+    background: rgba(0, 30, 45, .55);
+    pointer-events: none;
+  }
+  aside {
+    width: 232px;
+    border-left: 1px solid var(--line);
+    background: var(--panel);
+    padding: 12px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  aside h2 {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--cyan-dim);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 4px;
+    margin: 14px 0 8px;
+  }
+  aside h2:first-child { margin-top: 0; }
+  .props { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
+  .props label { color: var(--muted); }
+  .props input[type=number] {
+    width: 100%;
+    background: #061020;
+    color: var(--cyan);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 3px 6px;
+    font: inherit;
+  }
+  .props input[type=range] { width: 100%; accent-color: var(--cyan); }
+  #camList { display: flex; flex-wrap: wrap; gap: 6px; }
+  #camList .chip {
+    min-width: 30px; text-align: center;
+    padding: 3px 6px;
+    border: 1px solid var(--cyan-dim);
+    border-radius: 999px;
+    color: var(--cyan);
+    cursor: pointer;
+  }
+  #camList .chip.on {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: #201400;
+    box-shadow: 0 0 10px rgba(255,190,60,.6);
+  }
+  #noSel { color: var(--muted); }
+  #delBtn { width: 100%; margin-top: 8px; border-color: #5a2530; color: #ff8a9a; }
+  #delBtn:hover { border-color: #ff5570; box-shadow: 0 0 10px rgba(255,80,110,.3); }
+  footer {
+    padding: 4px 12px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">CAMPLAN<small>防犯カメラ設置図</small></span>
+  <button class="mode on" id="m0">選択</button>
+  <button class="mode" id="m1">カメラ追加</button>
+  <button class="mode" id="m2">壁</button>
+  <button class="mode" id="m3">消去</button>
+  <span class="sep"></span>
+  <button id="fit">全体表示</button>
+  <button id="theme">ライト/ダーク</button>
+  <span class="sep"></span>
+  <label class="filebtn">下絵を開く<input type="file" id="bgFile" accept="image/*" hidden></label>
+  <button id="bgClear">下絵を消す</button>
+  <span class="sep"></span>
+  <button id="save">保存</button>
+  <label class="filebtn">開く<input type="file" id="openFile" accept=".json,.camplan" hidden></label>
+  <button id="png">PNG出力</button>
+</header>
+<main>
+  <div id="stage"><canvas id="view" tabindex="0"></canvas></div>
+  <aside>
+    <h2>SELECTED CAMERA</h2>
+    <div id="selBox" style="display:none">
+      <div class="props">
+        <label>番号</label><input type="number" id="pNo" min="1" max="99">
+        <label>方向°</label><input type="number" id="pDir" min="0" max="359" step="1">
+        <label>画角°</label><input type="range" id="pFov" min="10" max="359" step="1">
+        <label></label><input type="number" id="pFovN" min="10" max="359" step="1">
+        <label>距離</label><input type="range" id="pRange" min="24" max="2000" step="1">
+        <label></label><input type="number" id="pRangeN" min="24" max="4000" step="1">
+      </div>
+      <button id="delBtn">このカメラを削除</button>
+    </div>
+    <div id="noSel">カメラをクリックで選択</div>
+    <h2>CAMERAS</h2>
+    <div id="camList"></div>
+  </aside>
+</main>
+<footer id="hint">左ドラッグ: 移動 / 空白ドラッグ: パン / ホイール: ズーム / 追加モード: クリック→そのままドラッグで向きを決める / 壁モード: クリックで頂点、Enterか右クリックで確定</footer>
+
+<script src="camplan.js"></script>
+<script>
+createCamplan().then(function (M) {
+  'use strict';
+  var canvas = document.getElementById('view');
+  var ctx = canvas.getContext('2d');
+  var stage = document.getElementById('stage');
+  var lastW = 0, lastH = 0;
+  var panelStale = true;
+
+  function fit() {
+    var r = stage.getBoundingClientRect();
+    var w = Math.max(Math.floor(r.width), 100);
+    var h = Math.max(Math.floor(r.height), 100);
+    if (w === lastW && h === lastH) return;
+    canvas.width = w; canvas.height = h;
+    if (lastW) M._cp_resize(w, h); else M._cp_init(w, h);
+    lastW = w; lastH = h;
+  }
+  fit();
+  new ResizeObserver(fit).observe(stage);
+
+  function present() {
+    var ptr = M._cp_render();
+    var img = new ImageData(
+        new Uint8ClampedArray(M.HEAPU8.buffer, ptr, lastW * lastH * 4)
+            .slice(), lastW, lastH);
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /* ------------------------------------------------------------ panel */
+  var selBox = document.getElementById('selBox');
+  var noSel = document.getElementById('noSel');
+  var camList = document.getElementById('camList');
+  var pNo = document.getElementById('pNo');
+  var pDir = document.getElementById('pDir');
+  var pFov = document.getElementById('pFov');
+  var pFovN = document.getElementById('pFovN');
+  var pRange = document.getElementById('pRange');
+  var pRangeN = document.getElementById('pRangeN');
+
+  function refreshPanel() {
+    var no = M._cp_sel_number();
+    selBox.style.display = no ? '' : 'none';
+    noSel.style.display = no ? 'none' : '';
+    if (no) {
+      if (document.activeElement !== pNo) pNo.value = no;
+      if (document.activeElement !== pDir)
+        pDir.value = Math.round(M._cp_sel_dir());
+      var fov = Math.round(M._cp_sel_fov());
+      var range = Math.round(M._cp_sel_range());
+      pFov.value = fov;
+      if (document.activeElement !== pFovN) pFovN.value = fov;
+      pRange.value = range;
+      if (document.activeElement !== pRangeN) pRangeN.value = range;
+    }
+    var n = M._cp_camera_count();
+    var want = [];
+    for (var i = 0; i < n; i++) want.push(M._cp_camera_number_at(i));
+    want.sort(function (a, b) { return a - b; });
+    camList.innerHTML = '';
+    want.forEach(function (num) {
+      var chip = document.createElement('span');
+      chip.className = 'chip' + (num === no ? ' on' : '');
+      chip.textContent = num;
+      chip.onclick = function () { M._cp_select_number(num); panelStale = true; };
+      camList.appendChild(chip);
+    });
+    panelStale = false;
+  }
+
+  pNo.onchange = function () {
+    if (!M._cp_sel_set_number(parseInt(pNo.value, 10) || 0))
+      pNo.value = M._cp_sel_number();
+    panelStale = true;
+  };
+  pDir.onchange = function () { M._cp_sel_set_dir(parseFloat(pDir.value) || 0); };
+  function setFov(v) { M._cp_sel_set_fov(parseFloat(v) || 90); panelStale = true; }
+  function setRange(v) { M._cp_sel_set_range(parseFloat(v) || 200); panelStale = true; }
+  pFov.oninput = function () { setFov(pFov.value); };
+  pFovN.onchange = function () { setFov(pFovN.value); };
+  pRange.oninput = function () { setRange(pRange.value); };
+  pRangeN.onchange = function () { setRange(pRangeN.value); };
+  document.getElementById('delBtn').onclick = function () {
+    M._cp_delete_selected();
+    panelStale = true;
+  };
+
+  /* ------------------------------------------------------------- modes */
+  var modeButtons = [0, 1, 2, 3].map(function (i) {
+    var b = document.getElementById('m' + i);
+    b.onclick = function () { setMode(i); };
+    return b;
+  });
+  function setMode(i) {
+    M._cp_set_mode(i);
+    modeButtons.forEach(function (b, k) {
+      b.classList.toggle('on', k === i);
+    });
+    canvas.focus();
+  }
+  document.getElementById('fit').onclick = function () {
+    M._cp_zoom_fit();
+    canvas.focus();
+  };
+  var darkTheme = true;
+  document.getElementById('theme').onclick = function () {
+    darkTheme = !darkTheme;
+    M._cp_set_theme(darkTheme ? 0 : 1);
+    document.body.style.filter = '';
+  };
+
+  /* ------------------------------------------------------------- input */
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+  canvas.addEventListener('pointerdown', function (e) {
+    canvas.setPointerCapture(e.pointerId);
+    canvas.focus();
+    var p = pos(e);
+    M._cp_mouse_down(p[0], p[1], e.button);
+    panelStale = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    var p = pos(e);
+    M._cp_mouse_move(p[0], p[1]);
+    if (e.buttons) panelStale = true;
+  });
+  canvas.addEventListener('pointerup', function (e) {
+    var p = pos(e);
+    M._cp_mouse_up(p[0], p[1], e.button);
+    panelStale = true;
+  });
+  canvas.addEventListener('wheel', function (e) {
+    var p = pos(e);
+    M._cp_wheel(p[0], p[1], e.deltaY);
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT') return;
+    var codes = { Delete: 46, Backspace: 8, Enter: 13, Escape: 27 };
+    if (codes[e.key]) {
+      M._cp_key(codes[e.key]);
+      panelStale = true;
+      e.preventDefault();
+    }
+  });
+
+  /* -------------------------------------------------------- background */
+  function loadImageFile(file) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var off = document.createElement('canvas');
+      off.width = img.naturalWidth;
+      off.height = img.naturalHeight;
+      off.getContext('2d').drawImage(img, 0, 0);
+      var data = off.getContext('2d')
+          .getImageData(0, 0, off.width, off.height).data;
+      var px = M._cp_alloc(data.length);
+      M.HEAPU8.set(data, px);
+      file.arrayBuffer().then(function (buf) {
+        var bytes = new Uint8Array(buf);
+        var fp = M._cp_alloc(bytes.length);
+        M.HEAPU8.set(bytes, fp);
+        var name = new TextEncoder().encode(file.name + '\0');
+        var np = M._cp_alloc(name.length);
+        M.HEAPU8.set(name, np);
+        M._cp_set_background(px, off.width, off.height, fp, bytes.length, np);
+        M._cp_free(px); M._cp_free(fp); M._cp_free(np);
+        panelStale = true;
+      });
+    };
+    img.src = url;
+  }
+  document.getElementById('bgFile').onchange = function (e) {
+    if (e.target.files[0]) loadImageFile(e.target.files[0]);
+    e.target.value = '';
+  };
+  document.getElementById('bgClear').onclick = function () {
+    M._cp_clear_background();
+  };
+
+  /* ------------------------------------------------------- save / load */
+  function download(blob, name) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+  }
+  document.getElementById('save').onclick = function () {
+    var ptr = M._cp_save();
+    var size = M._cp_save_size();
+    var text = new Uint8Array(M.HEAPU8.buffer, ptr, size).slice();
+    download(new Blob([text], { type: 'application/json' }), 'camplan.json');
+  };
+  function loadJsonFile(file) {
+    file.arrayBuffer().then(function (buf) {
+      var bytes = new Uint8Array(buf);
+      var p = M._cp_alloc(bytes.length);
+      M.HEAPU8.set(bytes, p);
+      var ok = M._cp_load(p, bytes.length);
+      M._cp_free(p);
+      if (!ok) { alert('このファイルは読めませんでした'); return; }
+      var size = M._cp_bg_size();
+      if (size > 0) {
+        var bgPtr = M._cp_bg_bytes();
+        var fileBytes = new Uint8Array(M.HEAPU8.buffer, bgPtr, size).slice();
+        var img = new Image();
+        var url = URL.createObjectURL(new Blob([fileBytes]));
+        img.onload = function () {
+          URL.revokeObjectURL(url);
+          var off = document.createElement('canvas');
+          off.width = img.naturalWidth;
+          off.height = img.naturalHeight;
+          off.getContext('2d').drawImage(img, 0, 0);
+          var data = off.getContext('2d')
+              .getImageData(0, 0, off.width, off.height).data;
+          var px = M._cp_alloc(data.length);
+          M.HEAPU8.set(data, px);
+          M._cp_set_background_pixels(px, off.width, off.height);
+          M._cp_free(px);
+        };
+        img.src = url;
+      }
+      panelStale = true;
+    });
+  }
+  document.getElementById('openFile').onchange = function (e) {
+    if (e.target.files[0]) loadJsonFile(e.target.files[0]);
+    e.target.value = '';
+  };
+
+  /* -------------------------------------------------------------- drop */
+  ['dragover', 'dragenter'].forEach(function (t) {
+    stage.addEventListener(t, function (e) {
+      e.preventDefault();
+      stage.classList.add('dropping');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (t) {
+    stage.addEventListener(t, function (e) {
+      e.preventDefault();
+      stage.classList.remove('dropping');
+    });
+  });
+  stage.addEventListener('drop', function (e) {
+    var file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (/\.(json|camplan)$/i.test(file.name)) loadJsonFile(file);
+    else loadImageFile(file);
+  });
+
+  /* ---------------------------------------------------------- PNG out */
+  document.getElementById('png').onclick = function () {
+    var ptr = M._cp_export_render();
+    var w = M._cp_export_w(), h = M._cp_export_h();
+    var img = new ImageData(
+        new Uint8ClampedArray(M.HEAPU8.buffer, ptr, w * h * 4).slice(), w, h);
+    var off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    off.getContext('2d').putImageData(img, 0, 0);
+    off.toBlob(function (blob) { download(blob, 'camplan.png'); }, 'image/png');
+  };
+
+  /* -------------------------------------------------------------- loop */
+  function frame() {
+    fit();
+    if (M._cp_dirty()) {
+      present();
+      if (panelStale !== false) refreshPanel();
+      panelStale = true;   // handle drags updating fov/range live
+    }
+    if (panelStale) refreshPanel();
+    requestAnimationFrame(frame);
+  }
+  M._cp_set_theme(0);
+  requestAnimationFrame(frame);
+});
+</script>
+</body>
+</html>
