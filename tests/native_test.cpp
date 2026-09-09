@@ -117,8 +117,14 @@ int main(int argc, char ** argv) {
         std::fprintf(stderr, "background: bad size %dx%d\n", bgW, bgH);
         return 1;
     }
+    // The document keeps the dropped file itself, never a re-encode of it.
+    if (bgDoc.background->fileBytes != jpeg) {
+        std::fprintf(stderr, "background: file bytes changed\n");
+        return 1;
+    }
     Document bgReloaded;
     if (!bgReloaded.fromJson(bgDoc.toJson()) || !bgReloaded.background ||
+        bgReloaded.background->fileBytes != jpeg ||
         bgReloaded.background->w != bgW ||
         bgReloaded.background->h != bgH ||
         bgReloaded.background->name != "cocololo.jpg" ||
