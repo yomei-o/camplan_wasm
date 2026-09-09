@@ -107,6 +107,25 @@
     font: inherit;
   }
   .props input[type=range] { width: 100%; accent-color: var(--cyan); }
+  #pKv { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; }
+  #pKv input {
+    min-width: 0;
+    background: #061020;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 3px 5px;
+    font: inherit;
+  }
+  #pKv input.k { color: var(--cyan); }
+  #pKv button {
+    padding: 2px 6px;
+    color: var(--muted);
+    border-color: transparent;
+  }
+  #pKv button:hover { color: #ff8a9a; border-color: #5a2530; box-shadow: none; }
+  #kvAdd { width: 100%; margin-top: 6px; }
+  #kvNone { color: var(--muted); }
   #camList { display: flex; flex-wrap: wrap; gap: 6px; }
   #camList .chip {
     min-width: 30px; text-align: center;
@@ -166,6 +185,10 @@
         <label>距離</label><input type="range" id="pRange" min="24" max="2000" step="1">
         <label></label><input type="number" id="pRangeN" min="24" max="4000" step="1">
       </div>
+      <h2>PROPERTIES</h2>
+      <div id="pKv"></div>
+      <div id="kvNone">プロパティなし</div>
+      <button id="kvAdd">+ 行を追加</button>
       <button id="delBtn">このカメラを削除</button>
     </div>
     <div id="noSel">カメラをクリックで選択</div>
@@ -221,6 +244,85 @@ createCamplan().then(function (M) {
   var pRange = document.getElementById('pRange');
   var pRangeN = document.getElementById('pRangeN');
 
+  /* Free-form properties.  Strings cross the boundary as UTF-8 on the wasm
+     heap, so every one of them has to be freed again. */
+  var pKv = document.getElementById('pKv');
+  var kvNone = document.getElementById('kvNone');
+  var kvShown = null;   // what the rows currently show, to avoid rebuilding
+
+  function withStrings(fn, strings) {
+    var ptrs = strings.map(function (s) { return M.stringToNewUTF8(s); });
+    try { return fn.apply(null, ptrs); }
+    finally { ptrs.forEach(function (p) { M._cp_free(p); }); }
+  }
+  function readProps() {
+    var rows = [];
+    for (var i = 0, n = M._cp_sel_prop_count(); i < n; i++)
+      rows.push([M.UTF8ToString(M._cp_sel_prop_key(i)),
+                 M.UTF8ToString(M._cp_sel_prop_value(i))]);
+    return rows;
+  }
+  function cameraProps(no) {
+    if (!no) return {};
+    try { return JSON.parse(M.UTF8ToString(M._cp_camera_props(no))); }
+    catch (err) { return {}; }
+  }
+  function refreshProps(no) {
+    var rows = readProps();
+    var sig = JSON.stringify([no, rows]);
+    if (sig === kvShown) return;
+    // Never pull the rows out from under someone who is typing in them.
+    if (pKv.contains(document.activeElement)) return;
+    kvShown = sig;
+    kvNone.style.display = rows.length ? 'none' : '';
+    pKv.innerHTML = '';
+    rows.forEach(function (row) {
+      var key = row[0];
+      var k = document.createElement('input');
+      k.type = 'text';
+      k.className = 'k';
+      k.value = key;
+      k.title = 'キー';
+      k.onchange = function () {
+        if (!withStrings(M._cp_sel_rename_prop, [key, k.value])) {
+          k.value = key;
+          alert('キーが空か、すでに使われています');
+        }
+        kvShown = null;
+        panelStale = true;
+      };
+      var v = document.createElement('input');
+      v.type = 'text';
+      v.value = row[1];
+      v.title = '値';
+      v.onchange = function () {
+        withStrings(M._cp_sel_set_prop, [key, v.value]);
+        kvShown = null;
+        panelStale = true;
+      };
+      var del = document.createElement('button');
+      del.textContent = '×';
+      del.title = 'この行を削除';
+      del.onclick = function () {
+        withStrings(M._cp_sel_remove_prop, [key]);
+        kvShown = null;
+        panelStale = true;
+      };
+      pKv.appendChild(k);
+      pKv.appendChild(v);
+      pKv.appendChild(del);
+    });
+  }
+  document.getElementById('kvAdd').onclick = function () {
+    var used = {};
+    readProps().forEach(function (row) { used[row[0]] = true; });
+    var i = 1;
+    while (used['key' + i]) i++;
+    withStrings(M._cp_sel_set_prop, ['key' + i, '']);
+    kvShown = null;
+    panelStale = true;
+  };
+
   function refreshPanel() {
     var no = M._cp_sel_number();
     selBox.style.display = no ? '' : 'none';
@@ -235,6 +337,7 @@ createCamplan().then(function (M) {
       if (document.activeElement !== pFovN) pFovN.value = fov;
       pRange.value = range;
       if (document.activeElement !== pRangeN) pRangeN.value = range;
+      refreshProps(no);
     }
     var n = M._cp_camera_count();
     var want = [];
@@ -333,17 +436,20 @@ createCamplan().then(function (M) {
     e.preventDefault();
   }, { passive: false });
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-  // A double click on a camera hands its number to the page - the hook for
-  // opening that camera's live video.  Replace window.onCameraOpen (or listen
-  // for the 'camplan:camera' event) to wire in the real player.
+  // A double click on a camera hands its number and its properties to the
+  // page - the hook for opening that camera's live video.  Replace
+  // window.onCameraOpen (or listen for the 'camplan:camera' event) to wire in
+  // the real player.
   canvas.addEventListener('dblclick', function (e) {
     var p = pos(e);
     var no = M._cp_camera_at(p[0], p[1]);
     if (!no) return;
+    var props = cameraProps(no);
     window.dispatchEvent(new CustomEvent('camplan:camera',
-                                         { detail: { number: no } }));
-    if (window.onCameraOpen) window.onCameraOpen(no);
-    else alert('カメラ ' + no + ' の映像を表示（ここにプレーヤーを接続）');
+        { detail: { number: no, props: props } }));
+    if (window.onCameraOpen) window.onCameraOpen(no, props);
+    else alert('カメラ ' + no + ' の映像を表示（ここにプレーヤーを接続）\n' +
+               JSON.stringify(props));
     e.preventDefault();
   });
   document.addEventListener('keydown', function (e) {
@@ -463,12 +569,23 @@ createCamplan().then(function (M) {
 
   /* -------------------------------------------------------------- loop */
   var shownMode = 0;
+  var shownSel = 0;
   function frame() {
     fit();
     var m = M._cp_get_mode();
     if (m !== shownMode) {
       shownMode = m;
       modeButtons.forEach(function (b, k) { b.classList.toggle('on', k === m); });
+    }
+    // Selecting a camera - by click, by chip, by keyboard - hands the same
+    // { number, props } object to the page.  0 means nothing is selected now.
+    var sel = M._cp_sel_number();
+    if (sel !== shownSel) {
+      shownSel = sel;
+      var detail = { number: sel, props: cameraProps(sel) };
+      window.dispatchEvent(new CustomEvent('camplan:select',
+                                           { detail: detail }));
+      if (window.onCameraSelect) window.onCameraSelect(sel, detail.props);
     }
     if (M._cp_dirty()) {
       present();

@@ -9,6 +9,48 @@
 
 namespace cam {
 
+// Control characters would have to be escaped in the JSON and cannot be typed
+// into the panel's inputs anyway, so they never enter a property.
+std::string plainText(const std::string & s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s)
+        if ((unsigned char)c >= 0x20) out.push_back(c);
+    return out;
+}
+
+int Camera::findProp(const std::string & key) const {
+    for (size_t i = 0; i < props.size(); i++)
+        if (props[i].key == key) return (int)i;
+    return -1;
+}
+
+bool Camera::setProp(const std::string & key, const std::string & value) {
+    const std::string k = plainText(key);
+    if (k.empty()) return false;
+    const int at = findProp(k);
+    if (at >= 0) props[(size_t)at].value = plainText(value);
+    else props.push_back({k, plainText(value)});
+    return true;
+}
+
+bool Camera::renameProp(const std::string & from, const std::string & to) {
+    const std::string k = plainText(to);
+    const int at = findProp(from);
+    if (at < 0 || k.empty()) return false;
+    if (k == from) return true;
+    if (findProp(k) >= 0) return false;
+    props[(size_t)at].key = k;
+    return true;
+}
+
+bool Camera::removeProp(const std::string & key) {
+    const int at = findProp(key);
+    if (at < 0) return false;
+    props.erase(props.begin() + at);
+    return true;
+}
+
 bool Document::setBackgroundFile(const uint8_t * data, size_t size,
                                 const std::string & name) {
     Background bg;
@@ -196,6 +238,18 @@ struct Parser {
 
 }   // namespace
 
+std::string Camera::propsJson() const {
+    std::string out = "{";
+    for (size_t i = 0; i < props.size(); i++) {
+        if (i) out.push_back(',');
+        appendString(out, props[i].key);
+        out.push_back(':');
+        appendString(out, props[i].value);
+    }
+    out.push_back('}');
+    return out;
+}
+
 std::string Document::toJson() const {
     std::string out = "{\"app\":\"camplan\",\"version\":1";
     out += ",\"marker\":";
@@ -233,6 +287,10 @@ std::string Document::toJson() const {
         appendNumber(out, c.fovDeg);
         out += ",\"range\":";
         appendNumber(out, c.range);
+        if (!c.props.empty()) {
+            out += ",\"props\":";
+            out += c.propsJson();
+        }
         out.push_back('}');
     }
     out += "]}";
@@ -302,7 +360,20 @@ bool Document::fromJson(const std::string & text) {
                         if (!in.string(k)) break;
                         if (!in.eat(':')) return false;
                         float v = 0;
-                        if (k == "no" && in.number(v)) c.number = (int)v;
+                        if (k == "props") {
+                            if (!in.eat('{')) return false;
+                            if (!in.eat('}')) {
+                                do {
+                                    std::string pk, pv;
+                                    if (!in.string(pk) || !in.eat(':') ||
+                                        !in.string(pv))
+                                        return false;
+                                    c.setProp(pk, pv);
+                                } while (in.eat(','));
+                                if (!in.eat('}')) return false;
+                            }
+                        }
+                        else if (k == "no" && in.number(v)) c.number = (int)v;
                         else if (k == "x" && in.number(v)) c.x = v;
                         else if (k == "y" && in.number(v)) c.y = v;
                         else if (k == "dir" && in.number(v)) c.dirDeg = v;

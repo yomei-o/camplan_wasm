@@ -92,6 +92,58 @@ int main(int argc, char ** argv) {
         std::fprintf(stderr, "round trip: documents differ\n");
         return 1;
     }
+    // Free-form properties: any strings, kept in order, unique by key, and
+    // carried through the JSON beside the number.
+    {
+        Camera & c = app.doc.cameras[0];
+        if (!c.setProp("url", "rtsp://cam1/stream") ||
+            !c.setProp("室名", "エントランス") || !c.setProp("tag", "A-001")) {
+            std::fprintf(stderr, "props: set failed\n");
+            return 1;
+        }
+        c.setProp("url", "rtsp://cam1/main");        // replaces, stays first
+        if (c.props.size() != 3 || c.props[0].key != "url" ||
+            c.props[0].value != "rtsp://cam1/main") {
+            std::fprintf(stderr, "props: replace changed the order\n");
+            return 1;
+        }
+        if (c.setProp("", "x") || c.setProp("\t\n", "x")) {
+            std::fprintf(stderr, "props: an empty key was accepted\n");
+            return 1;
+        }
+        // Control characters are cut on the way in.
+        if (!c.setProp("note", "a\tb") || c.props.back().value != "ab") {
+            std::fprintf(stderr, "props: control character kept\n");
+            return 1;
+        }
+        if (c.renameProp("tag", "室名") || c.renameProp("tag", "")) {
+            std::fprintf(stderr, "props: a bad rename was accepted\n");
+            return 1;
+        }
+        if (!c.renameProp("tag", "asset") || c.props[2].key != "asset") {
+            std::fprintf(stderr, "props: rename lost the row's place\n");
+            return 1;
+        }
+        if (!c.removeProp("note") || c.removeProp("note") ||
+            c.props.size() != 3) {
+            std::fprintf(stderr, "props: remove\n");
+            return 1;
+        }
+        if (c.propsJson() !=
+            "{\"url\":\"rtsp://cam1/main\",\"室名\":\"エントランス\","
+            "\"asset\":\"A-001\"}") {
+            std::fprintf(stderr, "props: json is %s\n", c.propsJson().c_str());
+            return 1;
+        }
+        const std::string withProps = app.doc.toJson();
+        Document back;
+        if (!back.fromJson(withProps) || back.toJson() != withProps ||
+            back.cameras[0].props != c.props) {
+            std::fprintf(stderr, "props: round trip differs\n");
+            return 1;
+        }
+    }
+
     // The background: a real JPEG, decoded on this side, and still decodable
     // after a trip through the JSON (which carries the file, not the pixels).
     std::vector<uint8_t> jpeg;

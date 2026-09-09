@@ -102,6 +102,53 @@ createCamplan().then((M) => {
     if (Math.abs(M._cp_sel_fov() - fov0) > 0.5)
         throw new Error('undo slider: ' + M._cp_sel_fov());
 
+    // Free-form properties on the selected camera, the way the panel edits
+    // them: strings in as UTF-8, an object out for the page's click hook.
+    const withStrings = (fn, strings) => {
+        const ptrs = strings.map((s) => M.stringToNewUTF8(s));
+        try { return fn.apply(null, ptrs); }
+        finally { ptrs.forEach((p) => M._cp_free(p)); }
+    };
+    M._cp_select_number(20);
+    if (!withStrings(M._cp_sel_set_prop, ['url', 'rtsp://cam20/main']))
+        throw new Error('set prop');
+    if (!withStrings(M._cp_sel_set_prop, ['室名', 'エントランス']))
+        throw new Error('set prop utf-8');
+    if (!withStrings(M._cp_sel_set_prop, ['tmp', 'x'])) throw new Error('set');
+    if (withStrings(M._cp_sel_set_prop, ['', 'x']))
+        throw new Error('empty key accepted');
+    if (withStrings(M._cp_sel_rename_prop, ['tmp', 'url']))
+        throw new Error('duplicate rename accepted');
+    if (!withStrings(M._cp_sel_remove_prop, ['tmp']))
+        throw new Error('remove prop');
+    if (M._cp_sel_prop_count() !== 2) throw new Error('prop count');
+    if (M.UTF8ToString(M._cp_sel_prop_key(1)) !== '室名')
+        throw new Error('prop key round trip');
+
+    // An edit is one undo step, and the properties come back with it.
+    M._cp_undo();
+    M._cp_select_number(20);
+    if (M._cp_sel_prop_count() !== 3) throw new Error('undo prop');
+    M._cp_redo();
+    M._cp_select_number(20);
+    if (M._cp_sel_prop_count() !== 2) throw new Error('redo prop');
+
+    // Save and reload: the properties travel in the JSON beside the number.
+    const pSavePtr = M._cp_save();
+    const pJson = Buffer.from(M.HEAPU8.buffer, pSavePtr,
+                              M._cp_save_size()).toString();
+    const pBytes = Buffer.from(pJson);
+    const pp = M._cp_alloc(pBytes.length);
+    M.HEAPU8.set(pBytes, pp);
+    if (!M._cp_load(pp, pBytes.length)) throw new Error('load with props');
+    M._cp_free(pp);
+    const got = JSON.parse(M.UTF8ToString(M._cp_camera_props(20)));
+    if (got.url !== 'rtsp://cam20/main' || got['室名'] !== 'エントランス' ||
+        Object.keys(got).length !== 2)
+        throw new Error('props after reload: ' + JSON.stringify(got));
+    if (M.UTF8ToString(M._cp_camera_props(77)) !== '{}')
+        throw new Error('props of a camera that is not there');
+
     // The background: the page hands over the JPEG untouched and the wasm
     // side decodes it, so the export comes out at the image's own size.
     const jpeg = fs.readFileSync(path.join(__dirname, '../web/cocololo.jpg'));

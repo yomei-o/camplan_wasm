@@ -4,6 +4,15 @@
 
 ## 状態 (2026-09-09)
 
+カメラに任意の文字列プロパティ（キー/値）を持てるようにした。番号は今まで通り
+別扱い（1〜99、重複拒否、描画に使う）で、props はエディタが中身を見ない自由領域。
+JSON はカメラごとに `"props":{...}`、クリック/ダブルクリックで
+`{ number, props }` がページに渡る（`camplan:select` / `camplan:camera`、
+`window.onCameraSelect` / `window.onCameraOpen`）。パネルの編集 API は
+`cp_sel_prop_count/key/value`、`cp_sel_set_prop`、`cp_sel_rename_prop`、
+`cp_sel_remove_prop`、読み出しは `cp_camera_props(number)`。
+文字列は `stringToNewUTF8` / `UTF8ToString` でやりとりして cp_free で返す。
+
 下絵のデコードを C++ 側（stb_image）に移した。ページは受け取ったファイルを
 そのまま `cp_set_background(bytes, len, name)` に渡すだけで、Image/canvas/
 getImageData は使わない。JSON の中身は元から圧縮画像（base64）で、読み込み時の
@@ -32,6 +41,11 @@ getImageData は使わない。JSON の中身は元から圧縮画像（base64�
 - 座標は world = 下絵ピクセル。角度はスクリーン系で 0°=右、90°=下（y が下向きなので）。
 - PNG エンコードだけページ側（canvas.toBlob）。C++ に PNG エンコーダを足さない。
 - UI の器（ツールバー・パネル）は HTML/CSS。キャンバス内に UI を作り込まない。
+- props は文字列だけ。型を増やさない（数値が欲しいならページ側で parse する）。
+  キーは一意・空不可・順序は入力順、制御文字は setProp が落とす。だから JSON の
+  エスケープは `"` と `\` の2つで足り、パーサも今のままで済む。
+- props の編集 API は行単位（set/rename/remove）で、失敗する編集は履歴を積まない。
+  パネルが「全消し→全追加」をしないので、1操作＝1 undo が成り立つ。
 
 ## 罠
 
@@ -40,6 +54,10 @@ getImageData は使わない。JSON の中身は元から圧縮画像（base64�
 - SINGLE_FILE=1 なので配布物は docs/camplan.js と docs/index.html の2つだけ。
   index.html は web/ が原本で build.sh がコピーする。docs/ 直編集は消える。
 - Pages はリポ設定済み（docs/）。デプロイ = build.sh して push。
+- undo/redo は選択を外す（App::undo の selected_ = -1）。パネルのプロパティ行は
+  選択が無い間 DOM に残るだけで、選択し直せば C++ 側から作り直される。
+- tests/page_check.js は docs/ を配信して headless Chrome を CDP で叩く。
+  つまり **build.sh を先に走らせないと古い docs/ をテストする**。
 
 ## 次の候補
 

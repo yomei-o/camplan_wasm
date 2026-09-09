@@ -19,6 +19,7 @@ namespace {
 
 App g_app;
 std::string g_saveText;
+std::string g_propsText;
 
 }   // namespace
 
@@ -118,6 +119,65 @@ EMSCRIPTEN_KEEPALIVE int cp_camera_count(void) {
 EMSCRIPTEN_KEEPALIVE int cp_camera_number_at(int i) {
     if (i < 0 || i >= (int)g_app.doc.cameras.size()) return 0;
     return g_app.doc.cameras[i].number;
+}
+
+/* ----------------------------------------------------------- properties */
+
+// Free-form key/value strings on a camera, beside its number.  The editor
+// itself never looks at them; they exist for the page, which gets them as an
+// object when a camera is clicked.  Every setter refuses the edit (and leaves
+// no undo step behind) rather than silently making the table inconsistent.
+
+EMSCRIPTEN_KEEPALIVE int cp_sel_prop_count(void) {
+    const cam::Camera * c = g_app.selectedCamera();
+    return c ? (int)c->props.size() : 0;
+}
+EMSCRIPTEN_KEEPALIVE const char * cp_sel_prop_key(int i) {
+    const cam::Camera * c = g_app.selectedCamera();
+    if (!c || i < 0 || i >= (int)c->props.size()) return "";
+    return c->props[(size_t)i].key.c_str();
+}
+EMSCRIPTEN_KEEPALIVE const char * cp_sel_prop_value(int i) {
+    const cam::Camera * c = g_app.selectedCamera();
+    if (!c || i < 0 || i >= (int)c->props.size()) return "";
+    return c->props[(size_t)i].value.c_str();
+}
+
+// Adds the key or replaces its value.  0 = no selection, or an empty key.
+EMSCRIPTEN_KEEPALIVE int cp_sel_set_prop(const char * key,
+                                         const char * value) {
+    cam::Camera * c = g_app.selectedCamera();
+    if (!c || !key || cam::plainText(key).empty()) return 0;
+    g_app.pushHistory();
+    return c->setProp(key, value ? value : "") ? 1 : 0;
+}
+
+// Renames in place, keeping the row's position.  0 when the new key is empty
+// or already used by another row.
+EMSCRIPTEN_KEEPALIVE int cp_sel_rename_prop(const char * from,
+                                            const char * to) {
+    cam::Camera * c = g_app.selectedCamera();
+    if (!c || !from || !to) return 0;
+    const std::string want = cam::plainText(to);
+    if (want.empty() || c->findProp(from) < 0) return 0;
+    if (want != from && c->findProp(want) >= 0) return 0;
+    g_app.pushHistory();
+    return c->renameProp(from, want) ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int cp_sel_remove_prop(const char * key) {
+    cam::Camera * c = g_app.selectedCamera();
+    if (!c || !key || c->findProp(key) < 0) return 0;
+    g_app.pushHistory();
+    return c->removeProp(key) ? 1 : 0;
+}
+
+// Every property of one camera as a JSON object, for the page's click hook.
+// An unknown number gives {}.
+EMSCRIPTEN_KEEPALIVE const char * cp_camera_props(int number) {
+    const int at = g_app.doc.findCamera(number);
+    g_propsText = at < 0 ? "{}" : g_app.doc.cameras[(size_t)at].propsJson();
+    return g_propsText.c_str();
 }
 
 /* ------------------------------------------------------------ background */
