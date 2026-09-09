@@ -3,6 +3,7 @@
 // document, save and load - lives on this side.
 #include <emscripten.h>
 
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -121,28 +122,16 @@ EMSCRIPTEN_KEEPALIVE int cp_camera_number_at(int i) {
 
 /* ------------------------------------------------------------ background */
 
-EMSCRIPTEN_KEEPALIVE void cp_set_background(const uint32_t * pixels, int w,
-                                            int h, const uint8_t * file,
-                                            int fileLen, const char * name) {
-    cam::Background bg;
-    bg.name = name ? name : "";
-    bg.w = w;
-    bg.h = h;
-    bg.pixels.assign(pixels, pixels + (size_t)w * h);
-    if (file && fileLen > 0) bg.fileBytes.assign(file, file + fileLen);
-    g_app.doc.background = std::move(bg);
+// The page hands over the dropped file untouched; the decoding happens here
+// (stb_image), so the big RGBA buffer never crosses the boundary and the
+// browser is not asked to decode anything.  0 = not a readable image.
+EMSCRIPTEN_KEEPALIVE int cp_set_background(const uint8_t * file, int fileLen,
+                                           const char * name) {
+    if (fileLen <= 0 || !file) return 0;
+    if (!g_app.doc.setBackgroundFile(file, (size_t)fileLen,
+                                     name ? name : "")) return 0;
     g_app.zoomToFit();
-}
-
-// After cp_load, the stored file bytes still need decoding by the page; it
-// reads them here and hands the pixels back through this.
-EMSCRIPTEN_KEEPALIVE void cp_set_background_pixels(const uint32_t * pixels,
-                                                   int w, int h) {
-    if (!g_app.doc.background) return;
-    g_app.doc.background->w = w;
-    g_app.doc.background->h = h;
-    g_app.doc.background->pixels.assign(pixels, pixels + (size_t)w * h);
-    g_app.zoomToFit();
+    return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE void cp_clear_background(void) {
@@ -150,10 +139,6 @@ EMSCRIPTEN_KEEPALIVE void cp_clear_background(void) {
     g_app.markDirty();
 }
 
-EMSCRIPTEN_KEEPALIVE const uint8_t * cp_bg_bytes(void) {
-    return g_app.doc.background ? g_app.doc.background->fileBytes.data()
-                                : nullptr;
-}
 EMSCRIPTEN_KEEPALIVE int cp_bg_size(void) {
     return g_app.doc.background ? (int)g_app.doc.background->fileBytes.size()
                                 : 0;

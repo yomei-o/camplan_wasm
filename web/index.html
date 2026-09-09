@@ -372,33 +372,22 @@ createCamplan().then(function (M) {
   });
 
   /* -------------------------------------------------------- background */
+  // The file goes to C++ as-is: the wasm side decodes it (stb_image) and keeps
+  // the compressed bytes for saving, so the page never touches pixels here.
   function loadImageFile(file, name) {
-    var fileName = name || file.name;
-    var url = URL.createObjectURL(file);
-    var img = new Image();
-    img.onload = function () {
-      URL.revokeObjectURL(url);
-      var off = document.createElement('canvas');
-      off.width = img.naturalWidth;
-      off.height = img.naturalHeight;
-      off.getContext('2d').drawImage(img, 0, 0);
-      var data = off.getContext('2d')
-          .getImageData(0, 0, off.width, off.height).data;
-      var px = M._cp_alloc(data.length);
-      M.HEAPU8.set(data, px);
-      file.arrayBuffer().then(function (buf) {
-        var bytes = new Uint8Array(buf);
-        var fp = M._cp_alloc(bytes.length);
-        M.HEAPU8.set(bytes, fp);
-        var name = new TextEncoder().encode(file.name + '\0');
-        var np = M._cp_alloc(name.length);
-        M.HEAPU8.set(name, np);
-        M._cp_set_background(px, off.width, off.height, fp, bytes.length, np);
-        M._cp_free(px); M._cp_free(fp); M._cp_free(np);
-        panelStale = true;
-      });
-    };
-    img.src = url;
+    var fileName = name || file.name || 'image';
+    file.arrayBuffer().then(function (buf) {
+      var bytes = new Uint8Array(buf);
+      var fp = M._cp_alloc(bytes.length);
+      M.HEAPU8.set(bytes, fp);
+      var nameBytes = new TextEncoder().encode(fileName + '\0');
+      var np = M._cp_alloc(nameBytes.length);
+      M.HEAPU8.set(nameBytes, np);
+      var ok = M._cp_set_background(fp, bytes.length, np);
+      M._cp_free(fp); M._cp_free(np);
+      if (!ok) alert('この画像は読めませんでした（PNG / JPEG / BMP、3200万画素まで）');
+      panelStale = true;
+    });
   }
   document.getElementById('bgFile').onchange = function (e) {
     if (e.target.files[0]) loadImageFile(e.target.files[0]);
@@ -429,28 +418,9 @@ createCamplan().then(function (M) {
       M.HEAPU8.set(bytes, p);
       var ok = M._cp_load(p, bytes.length);
       M._cp_free(p);
+      // The embedded background comes back with the document - the wasm side
+      // decodes it while loading, so there is nothing left to do here.
       if (!ok) { alert('このファイルは読めませんでした'); return; }
-      var size = M._cp_bg_size();
-      if (size > 0) {
-        var bgPtr = M._cp_bg_bytes();
-        var fileBytes = new Uint8Array(M.HEAPU8.buffer, bgPtr, size).slice();
-        var img = new Image();
-        var url = URL.createObjectURL(new Blob([fileBytes]));
-        img.onload = function () {
-          URL.revokeObjectURL(url);
-          var off = document.createElement('canvas');
-          off.width = img.naturalWidth;
-          off.height = img.naturalHeight;
-          off.getContext('2d').drawImage(img, 0, 0);
-          var data = off.getContext('2d')
-              .getImageData(0, 0, off.width, off.height).data;
-          var px = M._cp_alloc(data.length);
-          M.HEAPU8.set(data, px);
-          M._cp_set_background_pixels(px, off.width, off.height);
-          M._cp_free(px);
-        };
-        img.src = url;
-      }
       panelStale = true;
     });
   }

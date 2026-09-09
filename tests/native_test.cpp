@@ -92,6 +92,50 @@ int main(int argc, char ** argv) {
         std::fprintf(stderr, "round trip: documents differ\n");
         return 1;
     }
-    std::printf("view.bmp and export.bmp written, round trip ok\n");
+    // The background: a real JPEG, decoded on this side, and still decodable
+    // after a trip through the JSON (which carries the file, not the pixels).
+    std::vector<uint8_t> jpeg;
+    if (FILE * f = std::fopen("../web/cocololo.jpg", "rb")) {
+        uint8_t buf[65536];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;)
+            jpeg.insert(jpeg.end(), buf, buf + n);
+        std::fclose(f);
+    }
+    if (jpeg.empty()) {
+        std::fprintf(stderr, "background: ../web/cocololo.jpg not readable\n");
+        return 1;
+    }
+    Document bgDoc;
+    if (!bgDoc.setBackgroundFile(jpeg.data(), jpeg.size(), "cocololo.jpg")) {
+        std::fprintf(stderr, "background: decode failed\n");
+        return 1;
+    }
+    const int bgW = bgDoc.background->w, bgH = bgDoc.background->h;
+    const std::vector<uint32_t> bgPixels = bgDoc.background->pixels;
+    if (bgW <= 0 || bgH <= 0 ||
+        bgPixels.size() != (size_t)bgW * (size_t)bgH) {
+        std::fprintf(stderr, "background: bad size %dx%d\n", bgW, bgH);
+        return 1;
+    }
+    Document bgReloaded;
+    if (!bgReloaded.fromJson(bgDoc.toJson()) || !bgReloaded.background ||
+        bgReloaded.background->w != bgW ||
+        bgReloaded.background->h != bgH ||
+        bgReloaded.background->name != "cocololo.jpg" ||
+        bgReloaded.background->pixels != bgPixels) {
+        std::fprintf(stderr, "background: round trip differs\n");
+        return 1;
+    }
+    // Garbage must be refused, and refusing must not lose what was there.
+    const std::vector<uint8_t> junk(1000, 0x41);
+    if (bgDoc.setBackgroundFile(junk.data(), junk.size(), "junk.png") ||
+        !bgDoc.background || bgDoc.background->w != bgW ||
+        bgDoc.background->pixels != bgPixels) {
+        std::fprintf(stderr, "background: junk was not refused\n");
+        return 1;
+    }
+
+    std::printf("view.bmp and export.bmp written, round trip ok, "
+                "background %dx%d decoded\n", bgW, bgH);
     return 0;
 }

@@ -24,8 +24,8 @@ struct Wall {
 
 struct Background {
     std::string name;                 // the dropped file's name
-    std::vector<uint8_t> fileBytes;   // the original file, for saving
-    std::vector<uint32_t> pixels;     // decoded RGBA
+    std::vector<uint8_t> fileBytes;   // the original PNG/JPEG, for saving
+    std::vector<uint32_t> pixels;     // decoded RGBA, from the bytes above
     int w = 0, h = 0;
 };
 
@@ -34,6 +34,11 @@ struct Document {
     std::vector<Wall> walls;
     std::vector<Camera> cameras;
     float markerSize = 16;   // the numbered disc's radius, world pixels
+
+    // Decodes the file and makes it the background.  Returns false when the
+    // bytes are not a readable image, and then the old background stays.
+    bool setBackgroundFile(const uint8_t * data, size_t size,
+                           const std::string & name);
 
     int findCamera(int number) const;
     // The lowest free number in 1..99, or 0 when all are taken.

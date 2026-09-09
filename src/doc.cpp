@@ -1,11 +1,23 @@
 #include "doc.h"
 
+#include "image.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
 namespace cam {
+
+bool Document::setBackgroundFile(const uint8_t * data, size_t size,
+                                const std::string & name) {
+    Background bg;
+    if (!decodeImage(data, size, bg.pixels, bg.w, bg.h)) return false;
+    bg.name = name;
+    bg.fileBytes.assign(data, data + size);
+    background = std::move(bg);
+    return true;
+}
 
 int Document::findCamera(int number) const {
     for (size_t i = 0; i < cameras.size(); i++)
@@ -246,21 +258,21 @@ bool Document::fromJson(const std::string & text) {
             sawApp = true;
         } else if (key == "background") {
             if (!in.eat('{')) return false;
-            Background bg;
-            std::string data;
+            std::string name, data;
             for (;;) {
                 std::string k;
                 if (!in.string(k)) break;
                 if (!in.eat(':')) return false;
-                if (k == "name") in.string(bg.name);
+                if (k == "name") in.string(name);
                 else if (k == "data") in.string(data);
                 else in.skipValue();
                 if (!in.eat(',')) break;
             }
             if (!in.eat('}')) return false;
-            bg.fileBytes = base64Decode(data);
-            // The pixels arrive later, decoded by the host.
-            loaded.background = std::move(bg);
+            // A file we cannot decode costs the drawing, not the plan: the
+            // cameras and walls still load, on graph paper.
+            const std::vector<uint8_t> file = base64Decode(data);
+            loaded.setBackgroundFile(file.data(), file.size(), name);
         } else if (key == "walls") {
             if (!in.eat('[')) return false;
             if (!in.eat(']')) {

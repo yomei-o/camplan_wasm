@@ -102,7 +102,44 @@ createCamplan().then((M) => {
     if (Math.abs(M._cp_sel_fov() - fov0) > 0.5)
         throw new Error('undo slider: ' + M._cp_sel_fov());
 
+    // The background: the page hands over the JPEG untouched and the wasm
+    // side decodes it, so the export comes out at the image's own size.
+    const jpeg = fs.readFileSync(path.join(__dirname, '../web/cocololo.jpg'));
+    const jp = M._cp_alloc(jpeg.length);
+    M.HEAPU8.set(jpeg, jp);
+    const nameBytes = Buffer.concat([Buffer.from('cocololo.jpg'),
+                                     Buffer.from([0])]);
+    const np = M._cp_alloc(nameBytes.length);
+    M.HEAPU8.set(nameBytes, np);
+    if (!M._cp_set_background(jp, jpeg.length, np))
+        throw new Error('set background');
+    M._cp_free(jp);
+    if (M._cp_bg_size() !== jpeg.length) throw new Error('bg file kept');
+
+    // Junk is refused, and refusing it keeps the background that was there.
+    const junk = Buffer.alloc(1000, 0x41);
+    const kp = M._cp_alloc(junk.length);
+    M.HEAPU8.set(junk, kp);
+    if (M._cp_set_background(kp, junk.length, np))
+        throw new Error('junk accepted');
+    M._cp_free(kp); M._cp_free(np);
+    if (M._cp_bg_size() !== jpeg.length) throw new Error('bg lost to junk');
+
+    // The saved file carries the JPEG, and loading it decodes on this side.
+    const bgSavePtr = M._cp_save();
+    const bgJson = Buffer.from(M.HEAPU8.buffer, bgSavePtr,
+                               M._cp_save_size()).toString();
+    const bgBytes = Buffer.from(bgJson);
+    const bp = M._cp_alloc(bgBytes.length);
+    M.HEAPU8.set(bgBytes, bp);
+    if (!M._cp_load(bp, bgBytes.length)) throw new Error('load with bg');
+    M._cp_free(bp);
+    if (M._cp_bg_size() !== jpeg.length) throw new Error('bg after reload');
+
     const ex = M._cp_export_render();
+    if (M._cp_export_w() !== 2035 || M._cp_export_h() !== 1316)
+        throw new Error('export size ' + M._cp_export_w() + 'x' +
+                        M._cp_export_h());
     writeBmp('node_export.bmp',
              Buffer.from(M.HEAPU8.buffer, ex, M._cp_export_w() *
                          M._cp_export_h() * 4),

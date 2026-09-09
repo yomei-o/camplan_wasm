@@ -2,7 +2,8 @@
 
 図面の上に防犯カメラを置き、番号・向き・視野をつけて設置図を作るエディタ。
 C++ をスクラッチで書いて WebAssembly にしたもので、描画は全部自前のソフトウェア
-ラスタライザ（線・円・扇形・焼き込みフォント）。外部ライブラリはゼロ。
+ラスタライザ（線・円・扇形・焼き込みフォント）。下絵の JPEG/PNG デコードだけ
+stb_image（public domain のヘッダ1枚）で、他に外部ライブラリは無い。
 
 **Play:** https://yomei-o.github.io/camplan_wasm/
 
@@ -64,8 +65,8 @@ window.addEventListener('camplan:camera', function (e) {
 sh tools/build.sh            # -> docs/camplan.js + docs/index.html
 
 # ネイティブテスト（描画を BMP に書いて目視 + JSON ラウンドトリップ）
-g++ -O2 -std=c++20 -o tests/native_test.exe \
-    tests/native_test.cpp src/app.cpp src/raster.cpp src/doc.cpp
+g++ -O2 -std=c++20 -Ithird_party -o tests/native_test.exe \
+    tests/native_test.cpp src/app.cpp src/raster.cpp src/doc.cpp src/image.cpp
 (cd tests && ./native_test.exe)
 
 # WASM スモークテスト（node で合成マウス操作）
@@ -82,6 +83,8 @@ node tests/node_check.js
 |---|---|
 | `src/raster.{h,cpp}` | 描画ライブラリ。距離場ベースの AA 線・円・扇形・文字・画像ブリット |
 | `src/doc.{h,cpp}` | ドキュメント（カメラ・壁・下絵）と JSON/base64 |
+| `src/image.{h,cpp}` | 下絵のデコード（stb_image を include する唯一の場所） |
+| `third_party/stb_image.h` | stb_image 2.30（public domain） |
 | `src/app.{h,cpp}` | エディタ本体。ツール・ヒットテスト・ハンドル・テーマ・描画 |
 | `src/wasm_main.cpp` | WASM 境界（cp_* エクスポート） |
 | `web/index.html` | UI シェル（ツールバー・パネル・入出力はページ側） |
