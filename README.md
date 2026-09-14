@@ -19,6 +19,9 @@ stb_image（public domain のヘッダ1枚）で、他に外部ライブラリ�
 | プロパティ | 右パネル PROPERTIES で 名前 / デバイスID / APIキー / コメント の4項目。番号と一緒に保存され、クリックでページに渡る |
 | マーカー | 右パネル DISPLAY で 〇＋数字 の大きさを調整（保存ファイルに記録） |
 | 映像 | カメラをダブルクリック → デバイスIDと APIキーがあれば Safie の映像。ページ側でフックを差せばそちらが優先（下記） |
+| 一時URL | ページ側が `window.camplanShare` を用意したときだけヘッダに出る。外部の人に「いま見ている階」を見せる URL を発行する |
+| 通報 | その URL を持って `window.onReport(url, info)` を呼ぶ。未定義なら alert |
+| 緯度経度 | 階ごとに設定できる（右パネル FLOOR の下）。通報の `info` に乗る |
 | 建物/階 | ページ側が `window.camplanStorage` を用意したときだけ右パネルの一番上に出る。建物を選ぶと階が並び、階を選ぶとその図面が開く |
 | 保存 | 建物/階が有効なら編集が止まった 1.5 秒後に自動保存。そうでなければヘッダの「ダウンロード」で JSON を落とす |
 | JSON | 一つのファイルに下絵画像も base64 で内包 — それだけで復元できる |
@@ -130,6 +133,35 @@ window.camplanStorage = {
 - **自動保存**: 編集が止まって 1.5 秒で `save()`。中身が前と同じなら書かない。
   階や建物を切り替える前には必ず書き切る
 - ヘッダの保存ボタンは「ダウンロード」。`建物名_階名.json` で落ちる
+- 階ごとの緯度・経度は予約キー `__camplan_buildings__` に
+  `{"建物名/階名": {"lat": 数値, "lon": 数値}}` で入る。図面の JSON には
+  入れていない（C++ を触らずに済ませるため）。`/` を含まないキーなので
+  建物としては読まれない
+
+## 一時URLと通報
+
+火災などのときに、外部の人へこの画面だけ見せる URL を渡すための口。
+**ページ側が `window.camplanShare` を用意したときだけ**ヘッダにボタンが出る。
+
+```js
+window.camplanShare = {
+  // 一時セッション付きの URL を返す（camplan が building/floor を足す）
+  issue: function () { return Promise.resolve(url); }
+};
+
+// 通報。未定義なら alert が出るだけ
+window.onReport = function (url, info) {
+  // info = { url, building, floor, lat, lon }
+};
+window.addEventListener('camplan:report', function (e) { /* e.detail も同じ */ });
+```
+
+- 発行された URL には `?session=…&building=…&floor=…` が付く。**受け取った人は
+  その階が開く**。発行後に階を切り替えると、欄の URL も今見ている階に追従する
+- 指定された階が消えていたら先頭の階を開いて、その旨を出す
+- 「通報」は URL がまだなら先に発行してから呼ぶ（通報する場面で二度手間にしない）
+- `camplanStorage.readOnly` が真のとき（= 一時URLで開いた人）は、共有のボタンを
+  出さず、建物/階の追加削除と緯度経度の編集もさせず、自動保存も止める
 
 ## ショートカット
 

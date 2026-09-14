@@ -65,6 +65,28 @@
     box-shadow: 0 0 14px rgba(0,216,255,.6);
   }
   .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  /* 一時URLの発行と通報。ページ側が camplanShare を用意したときだけ出る */
+  #shareBox { display: none; align-items: center; gap: 6px; }
+  #shareUrl {
+    width: 260px;
+    background: #061020;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font: inherit;
+  }
+  #shareUrl:focus { outline: none; border-color: var(--cyan-dim); }
+  #report { border-color: #7a2430; color: #ff9aa6; }
+  #report:hover {
+    border-color: #ff5069;
+    color: #ff5069;
+    box-shadow: 0 0 10px rgba(255,80,105,.3);
+  }
+  #shareMsg { color: var(--muted); font-size: 12px; }
+  #shareMsg.err { color: #ff6b81; }
+  #shareMsg.ok { color: var(--cyan); }
+  #roTag { color: #ffcf6b; font-size: 12px; }
   main { flex: 1; display: flex; min-height: 0; }
   #stage { flex: 1; position: relative; min-width: 0; }
   #stage canvas { position: absolute; inset: 0; outline: none; }
@@ -153,6 +175,20 @@
     font: inherit;
   }
   .navrow button { padding: 3px 8px; }
+  .navrow label { color: var(--muted); white-space: nowrap; }
+  .navrow input.geo {
+    min-width: 0;
+    flex: 1;
+    background: #061020;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 3px 5px;
+    font: inherit;
+  }
+  .navrow input.geo:focus { outline: none; border-color: var(--cyan-dim); }
+  .navrow input.geo:disabled { color: var(--muted); cursor: default; }
+  #geoRow { margin-top: 4px; }
   #flrList { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
   #flrList .row {
     padding: 4px 8px;
@@ -211,6 +247,16 @@
   <button id="save">ダウンロード</button>
   <label class="filebtn">開く<input type="file" id="openFile" accept=".json,.camplan" hidden></label>
   <button id="png">PNG出力</button>
+  <span class="sep" id="shareSep" style="display:none"></span>
+  <span id="shareBox">
+    <button id="shareIssue">一時URL発行</button>
+    <input id="shareUrl" type="text" readonly placeholder="未発行"
+           title="外部の人に渡す一時URL">
+    <button id="shareCopy">コピー</button>
+    <button id="report">通報</button>
+    <span id="shareMsg"></span>
+  </span>
+  <span id="roTag" style="display:none">閲覧のみ（一時URL）</span>
 </header>
 <main>
   <div id="stage"><canvas id="view" tabindex="0"></canvas></div>
@@ -228,6 +274,14 @@
         <button id="flrDel" title="この階を削除">&minus;</button>
       </div>
       <div id="flrList"></div>
+      <div class="navrow" id="geoRow">
+        <label>緯度</label>
+        <input id="bldLat" class="geo" type="text" placeholder="35.6812"
+               title="この階の緯度（-90〜90）">
+        <label>経度</label>
+        <input id="bldLon" class="geo" type="text" placeholder="139.7671"
+               title="この階の経度（-180〜180）">
+      </div>
       <div id="navMsg"></div>
     </div>
     <h2>SELECTED CAMERA</h2>
@@ -707,8 +761,19 @@ createCamplan().then(function (M) {
   var navMsg = document.getElementById('navMsg');
 
   var tree = {};          // { 建物名: [階名, ...] }
+  // 階ごとの付帯情報。いまは緯度・経度だけ。図面の JSON には入れず（C++ を
+  // 触らずに済ませるため）、"建物名/階名" と衝突しない予約キーにまとめて置く。
+  var META_KEY = '__camplan_buildings__';
+  var meta = {};          // { "建物名/階名": { lat: 数値, lon: 数値 } }
   var curBld = null;
   var curFlr = null;
+  // 一時URL で ?building=...&floor=... と指定されていたら、その階を開く
+  var wantBld = null, wantFlr = null;
+  try {
+    var q = new URLSearchParams(location.search);
+    wantBld = q.get('building');
+    wantFlr = q.get('floor');
+  } catch (e) { }
   var syncedJson = null;  // 最後に保存/読込した JSON。変化の判定に使う
   var saveTimer = null;
   var saving = false;
@@ -735,6 +800,66 @@ createCamplan().then(function (M) {
     Object.keys(tree).forEach(function (b) { tree[b].sort(); });
   }
 
+  /* ---- 建物ごとの緯度・経度 ---- */
+
+  var bldLat = document.getElementById('bldLat');
+  var bldLon = document.getElementById('bldLon');
+
+  function loadMeta() {
+    return Promise.resolve(store.load(META_KEY)).then(function (text) {
+      try { meta = JSON.parse(text) || {}; } catch (e) { meta = {}; }
+      if (typeof meta !== 'object' || !meta) meta = {};
+    }).catch(function () {
+      meta = {};        // まだ無いだけ。保存のときに作られる
+    });
+  }
+
+  function saveMeta() {
+    return store.save(META_KEY, JSON.stringify(meta));
+  }
+
+  function metaKey() {
+    return (curBld && curFlr) ? keyOf(curBld, curFlr) : null;
+  }
+
+  function showGeo() {
+    var m = meta[metaKey()] || {};
+    // 入力中の欄を書き換えない
+    if (document.activeElement !== bldLat)
+      bldLat.value = (typeof m.lat === 'number') ? String(m.lat) : '';
+    if (document.activeElement !== bldLon)
+      bldLon.value = (typeof m.lon === 'number') ? String(m.lon) : '';
+  }
+
+  // 空欄は「未設定」。数値として読めない、または範囲外なら拒否して戻す。
+  function geoChanged(which, input, limit) {
+    return function () {
+      var key = metaKey();
+      if (!store || store.readOnly || !key) return;
+      var text = input.value.trim();
+      var m = meta[key] || (meta[key] = {});
+      if (text === '') {
+        delete m[which];
+      } else {
+        var v = Number(text);
+        if (!isFinite(v) || v < -limit || v > limit) {
+          say((which === 'lat' ? '緯度' : '経度') +
+              'は -' + limit + '〜' + limit + ' の数値で入れてください', 'err');
+          showGeo();
+          return;
+        }
+        m[which] = v;
+      }
+      if (!m.lat && m.lat !== 0 && !m.lon && m.lon !== 0) delete meta[key];
+      say('保存中…');
+      saveMeta().then(function () {
+        say(key + ' の位置を保存しました');
+      }).catch(fail);
+    };
+  }
+  bldLat.onchange = geoChanged('lat', bldLat, 90);
+  bldLon.onchange = geoChanged('lon', bldLon, 180);
+
   function renderNav() {
     bldSel.innerHTML = '';
     Object.keys(tree).sort().forEach(function (b) {
@@ -744,6 +869,8 @@ createCamplan().then(function (M) {
       if (b === curBld) o.selected = true;
       bldSel.appendChild(o);
     });
+    refreshShareUrl();
+    showGeo();
     flrList.innerHTML = '';
     (tree[curBld] || []).forEach(function (f) {
       var row = document.createElement('div');
@@ -759,13 +886,13 @@ createCamplan().then(function (M) {
   // 編集が止まってから書き戻す。図面画像を含む JSON を毎回作るのは重いので、
   // 描画が更新された（= 何か操作があったかもしれない）ときだけ動かす。
   function touch() {
-    if (!store || !curBld || !curFlr || busy) return;
+    if (!store || store.readOnly || !curBld || !curFlr || busy) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(autoSave, AUTOSAVE_IDLE_MS);
   }
 
   function autoSave() {
-    if (!store || !curBld || !curFlr || busy || saving) return;
+    if (!store || store.readOnly || !curBld || !curFlr || busy || saving) return;
     var json = currentJson();
     if (json === syncedJson) return;        // 見た目が動いただけ（パン/ズーム等）
     var key = keyOf(curBld, curFlr);
@@ -780,7 +907,7 @@ createCamplan().then(function (M) {
 
   // 切り替え・削除の前に、溜まっている変更を確実に書き戻す
   function flush() {
-    if (!store || !curBld || !curFlr) return Promise.resolve();
+    if (!store || store.readOnly || !curBld || !curFlr) return Promise.resolve();
     clearTimeout(saveTimer);
     var json = currentJson();
     if (json === syncedJson) return Promise.resolve();
@@ -880,6 +1007,11 @@ createCamplan().then(function (M) {
     Promise.all(floors.map(function (f) { return store.remove(keyOf(gone, f)); }))
       .then(function () {
         delete tree[gone];
+        var dropped = false;
+        floors.forEach(function (f) {
+          if (meta[keyOf(gone, f)]) { delete meta[keyOf(gone, f)]; dropped = true; }
+        });
+        if (dropped) saveMeta().catch(function () { });
         curBld = null; curFlr = null; syncedJson = null;
         busy = false;
         var next = Object.keys(tree).sort()[0];
@@ -913,6 +1045,7 @@ createCamplan().then(function (M) {
     clearTimeout(saveTimer);
     say('削除中…');
     store.remove(keyOf(b, f)).then(function () {
+      if (meta[keyOf(b, f)]) { delete meta[keyOf(b, f)]; saveMeta().catch(function () { }); }
       tree[b] = floors.filter(function (x) { return x !== f; });
       curFlr = null; syncedJson = null;
       busy = false;
@@ -926,14 +1059,143 @@ createCamplan().then(function (M) {
     selectFloor(b, tree[b][0]);
   };
 
+  /* ---- 一時URLの発行と通報 ---------------------------------------------
+
+     火災などのときに、外部の人へこの画面だけ見せる URL を渡すための口。
+     camplan はセッションの作り方を知らない（camplanStorage と同じ考え方で、
+     ページ側が window.camplanShare.issue() を用意したときだけボタンが出る）。
+
+       window.camplanShare = { issue: function () { return Promise<url>; } };
+
+     通報は window.onReport(url, info) を呼ぶ。未定義なら alert を出すだけ。 */
+
+  var share = window.camplanShare || null;
+  var shareBox = document.getElementById('shareBox');
+  var shareUrlBox = document.getElementById('shareUrl');
+  var shareMsg = document.getElementById('shareMsg');
+  var issuedBase = '';    // camplanShare が返した URL（session まで）
+
+  function shareSay(text, cls) {
+    shareMsg.textContent = text || '';
+    shareMsg.className = cls || '';
+  }
+
+  // 受け取った人が「いま自分が見ている階」を開けるように、建物と階を足す。
+  // session はページ側の持ち物、建物と階は camplan の持ち物なので、URL の
+  // 組み立てもそこで分ける。
+  function shareUrlFor(base) {
+    if (!base) return '';
+    if (!curBld || !curFlr) return base;
+    return base + (base.indexOf('?') >= 0 ? '&' : '?') +
+      'building=' + encodeURIComponent(curBld) +
+      '&floor=' + encodeURIComponent(curFlr);
+  }
+
+  // 発行したあとに階を切り替えても、欄の URL は今見ている階を指すようにする
+  function refreshShareUrl() {
+    shareUrlBox.value = shareUrlFor(issuedBase);
+  }
+
+  function issueUrl() {
+    shareSay('発行中…');
+    return Promise.resolve(share.issue()).then(function (url) {
+      if (!url) throw new Error('URL が返ってきませんでした');
+      issuedBase = String(url);
+      refreshShareUrl();
+      shareSay('発行しました', 'ok');
+      return shareUrlBox.value;
+    });
+  }
+
+  document.getElementById('shareIssue').onclick = function () {
+    issueUrl().catch(function (e) { shareSay((e && e.message) || String(e), 'err'); });
+  };
+
+  document.getElementById('shareCopy').onclick = function () {
+    if (!shareUrlBox.value) { shareSay('先に発行してください', 'err'); return; }
+    var issuedUrl = shareUrlBox.value;
+    // clipboard API は安全なコンテキストでしか使えないので、古い手も残す
+    var fallback = function () {
+      shareUrlBox.removeAttribute('readonly');
+      shareUrlBox.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      shareUrlBox.setAttribute('readonly', '');
+      shareSay(ok ? 'コピーしました' : 'コピーできませんでした', ok ? 'ok' : 'err');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(issuedUrl)
+        .then(function () { shareSay('コピーしました', 'ok'); })
+        .catch(fallback);
+    } else {
+      fallback();
+    }
+  };
+
+  document.getElementById('report').onclick = function () {
+    // URL がまだなら先に発行する。通報する場面で二度手間にしない。
+    var step = issuedBase ? Promise.resolve(shareUrlBox.value) : issueUrl();
+    step.then(function (url) {
+      var m = meta[metaKey()] || {};
+      var info = {
+        url: url, building: curBld, floor: curFlr,
+        lat: (typeof m.lat === 'number') ? m.lat : null,
+        lon: (typeof m.lon === 'number') ? m.lon : null
+      };
+      if (window.onReport) {
+        window.onReport(url, info);
+      } else {
+        alert('通報（未実装）\n\nこの URL を rapidsos に送る予定です:\n' + url +
+              '\n\n建物: ' + (curBld || '-') + ' / 階: ' + (curFlr || '-') +
+              '\n位置: ' + (info.lat === null || info.lon === null
+                             ? '未設定' : info.lat + ', ' + info.lon));
+      }
+      window.dispatchEvent(new CustomEvent('camplan:report', { detail: info }));
+      shareSay('通報しました', 'ok');
+    }).catch(function (e) { shareSay((e && e.message) || String(e), 'err'); });
+  };
+
+  function initShare() {
+    // 一時URLで開いた人は、さらに URL を配れない（サーバ側でも temp ユーザの
+    // create_temp_session は拒否される）ので、そもそもボタンを出さない。
+    if (!share || (store && store.readOnly)) return;
+    shareBox.style.display = 'inline-flex';
+    document.getElementById('shareSep').style.display = '';
+  }
+
   function initStorage() {
     if (!store) return;                     // 単体動作。従来どおりファイル入出力のみ
     navBox.style.display = '';
+    if (store.readOnly) {
+      // 一時URLで見に来た人。建物や階をいじらせない（サーバ側でも弾かれる）
+      document.getElementById('roTag').style.display = '';
+      ['bldAdd', 'bldDel', 'flrAdd', 'flrDel'].forEach(function (id) {
+        document.getElementById(id).style.display = 'none';
+      });
+      bldLat.disabled = true;
+      bldLon.disabled = true;
+    }
     busy = true;
     say('読み込み中…');
     store.list().then(function (items) {
       buildTree(items);
+      return loadMeta().then(function () { return items; });
+    }).then(function (items) {
       var blds = Object.keys(tree).sort();
+      // 一時URL で建物と階を指定されていたら、それを開く。消えていたら先頭に戻す。
+      if (wantBld && wantFlr && tree[wantBld] &&
+          tree[wantBld].indexOf(wantFlr) >= 0) {
+        busy = false;
+        return selectFloor(wantBld, wantFlr);
+      }
+      // 指定はあったが見つからなかった。先頭を開いてから知らせる
+      // （selectFloor が最後に say('') するので、順番を逆にすると消える）
+      if (wantBld && wantFlr && blds.length) {
+        busy = false;
+        return selectFloor(blds[0], tree[blds[0]][0]).then(function () {
+          say('指定された階（' + wantBld + '/' + wantFlr + '）は見つかりませんでした', 'err');
+        });
+      }
       if (!blds.length) {
         // 何も無いところに作る最初の1枚。白紙だと何をする画面か分からないので
         // 見本の図面を入れておく。
@@ -1018,6 +1280,7 @@ createCamplan().then(function (M) {
   }
   M._cp_set_theme(0);
   initStorage();
+  initShare();
   // The demo plan, so the first visit has something to point cameras at.
   // A failure (file://, offline) just leaves the graph paper.
   // With storage the floor's own document is the starting point, so skip it.

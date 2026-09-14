@@ -181,13 +181,79 @@ with sync_playwright() as p:
     pg.click("#bldDel")
     pg.wait_for_timeout(2000)
     ck(buildings(pg) == ["本社ビル"], "建物が消える: %s" % buildings(pg))
-    ck(keys(pg) == ["本社ビル/1F"], "配下の階も全部消える: %s" % keys(pg))
+    ck([k for k in keys(pg) if "/" in k] == ["本社ビル/1F"],
+       "配下の階も全部消える: %s" % keys(pg))
 
     print("-- 最後の建物は消せない --")
     pg.click("#bldDel")
     pg.wait_for_timeout(600)
     ck("最後の建物は削除できません" in msg(pg), "メッセージ: %s" % msg(pg))
-    ck(keys(pg) == ["本社ビル/1F"], "消えていない")
+    ck([k for k in keys(pg) if "/" in k] == ["本社ビル/1F"], "消えていない")
+
+    print("-- 階ごとの緯度・経度 --")
+    # 図面の JSON には入れず、予約キーに "建物名/階名" で置く
+    META = "__camplan_buildings__"
+    ck(pg.input_value("#bldLat") == "" and pg.input_value("#bldLon") == "",
+       "最初は未設定")
+    pg.fill("#bldLat", "35.6812")
+    pg.locator("#bldLat").press("Tab")
+    pg.wait_for_timeout(800)
+    pg.fill("#bldLon", "139.7671")
+    pg.locator("#bldLon").press("Tab")
+    pg.wait_for_timeout(800)
+    saved = pg.evaluate("window.__kv.get('%s')" % META)
+    ck(saved is not None, "予約キーに保存される")
+    import json as _json
+    m = _json.loads(saved or "{}")
+    ck(m.get("本社ビル/1F", {}).get("lat") == 35.6812, "緯度: %s" % m)
+    ck(m.get("本社ビル/1F", {}).get("lon") == 139.7671, "経度: %s" % m)
+    ck(META not in [x for x in keys(pg) if "/" in x], "建物としては読まれない")
+    ck(pg.eval_on_selector_all("#bldSel option", "e=>e.map(x=>x.value)") ==
+       ["本社ビル"], "建物リストに混ざらない")
+
+    print("-- 階ごとに別々に持てる --")
+    pg.evaluate("window.prompt = () => '9F'")
+    pg.click("#flrAdd")
+    pg.wait_for_timeout(1500)
+    ck(pg.input_value("#bldLat") == "", "新しい階は未設定: %s" % pg.input_value("#bldLat"))
+    pg.fill("#bldLat", "35.7")
+    pg.locator("#bldLat").press("Tab")
+    pg.wait_for_timeout(900)
+    m2 = _json.loads(pg.evaluate("window.__kv.get('%s')" % META))
+    ck(m2.get("本社ビル/9F", {}).get("lat") == 35.7, "9F の緯度: %s" % m2)
+    ck(m2.get("本社ビル/1F", {}).get("lat") == 35.6812, "1F は変わらない: %s" % m2)
+    pg.click("#flrList .row:has-text('1F')")
+    pg.wait_for_timeout(1500)
+    ck(pg.input_value("#bldLat") == "35.6812", "1F に戻すと 1F の値: %s" % pg.input_value("#bldLat"))
+
+    print("-- 階を消すとその階の位置も消える --")
+    pg.click("#flrList .row:has-text('9F')")
+    pg.wait_for_timeout(1500)
+    pg.evaluate("window.confirm = () => true")
+    pg.click("#flrDel")
+    pg.wait_for_timeout(1800)
+    m2b = _json.loads(pg.evaluate("window.__kv.get('%s')" % META))
+    ck("本社ビル/9F" not in m2b, "9F の位置が消える: %s" % m2b)
+    ck(m2b.get("本社ビル/1F", {}).get("lat") == 35.6812, "1F は残る: %s" % m2b)
+
+    print("-- 範囲外は拒否 --")
+    pg.fill("#bldLat", "100")
+    pg.locator("#bldLat").press("Tab")
+    pg.wait_for_timeout(700)
+    ck("-90" in msg(pg), "メッセージ: %s" % msg(pg))
+    ck(pg.input_value("#bldLat") == "35.6812", "元の値に戻る: %s" % pg.input_value("#bldLat"))
+    pg.fill("#bldLon", "abc")
+    pg.locator("#bldLon").press("Tab")
+    pg.wait_for_timeout(700)
+    ck("-180" in msg(pg), "経度も: %s" % msg(pg))
+
+    print("-- 空にすると未設定に戻る --")
+    pg.fill("#bldLat", "")
+    pg.locator("#bldLat").press("Tab")
+    pg.wait_for_timeout(800)
+    m3 = _json.loads(pg.evaluate("window.__kv.get('%s')" % META))
+    ck("lat" not in m3.get("本社ビル/1F", {}), "緯度が消える: %s" % m3)
+    ck(m3.get("本社ビル/1F", {}).get("lon") == 139.7671, "経度は残る: %s" % m3)
 
     print("-- 名前のチェック --")
     pg.evaluate("window.prompt = () => 'a/b'")
@@ -201,6 +267,40 @@ with sync_playwright() as p:
 
     ck(errs == [], "JS エラーなし %s" % errs)
     pg.screenshot(path=os.path.join(HERE, "camplan_nav.png"), full_page=False)
+    ctx.close()
+
+    # ------------------------------------------------ 起動時に読み直す
+    print("== B2. 起動時に予約キーから読み直す ==")
+    ctx = b.new_context(viewport={"width": 1280, "height": 860})
+    pg = ctx.new_page()
+    errs = []
+    pg.on("pageerror", lambda e: errs.append(str(e)))
+    pg.add_init_script(MOCK + """
+    window.__kv.set('A社/1F', '{"app":"camplan","version":1,"walls":[],"cameras":[]}');
+    window.__kv.set('A社/2F', '{"app":"camplan","version":1,"walls":[],"cameras":[]}');
+    window.__kv.set('B社/1F', '{"app":"camplan","version":1,"walls":[],"cameras":[]}');
+    window.__kv.set('__camplan_buildings__',
+                    '{"A社/1F":{"lat":35.5,"lon":139.5},"A社/2F":{"lat":35.6,"lon":139.6},'
+                    + '"B社/1F":{"lat":34.7,"lon":135.5}}');
+    """)
+    pg.goto(URL, wait_until="load")
+    pg.wait_for_selector("#view", timeout=60000)
+    pg.wait_for_timeout(3000)
+    ck(pg.input_value("#bldLat") == "35.5", "緯度が読める: %s" % pg.input_value("#bldLat"))
+    ck(pg.input_value("#bldLon") == "139.5", "経度が読める: %s" % pg.input_value("#bldLon"))
+    ck(sorted(buildings(pg)) == ["A社", "B社"],
+       "予約キーは建物にならない: %s" % buildings(pg))
+    pg.click("#flrList .row:has-text('2F')")
+    pg.wait_for_timeout(1500)
+    ck(pg.input_value("#bldLat") == "35.6" and pg.input_value("#bldLon") == "139.6",
+       "階を切り替えるとその階の位置になる: %s / %s"
+       % (pg.input_value("#bldLat"), pg.input_value("#bldLon")))
+    pg.select_option("#bldSel", "B社")
+    pg.wait_for_timeout(1500)
+    ck(pg.input_value("#bldLat") == "34.7" and pg.input_value("#bldLon") == "135.5",
+       "建物を切り替えても追従する: %s / %s"
+       % (pg.input_value("#bldLat"), pg.input_value("#bldLon")))
+    ck(errs == [], "JS エラーなし %s" % errs)
     ctx.close()
 
     # ---------------------------------------------------- ストレージが壊れている
