@@ -208,8 +208,13 @@ with sync_playwright() as p:
     pg.goto(URL, wait_until="load")
     pg.wait_for_selector("#view", timeout=60000)
     pg.wait_for_timeout(2500)
-    ck(pg.eval_on_selector("#navBox", "e=>getComputedStyle(e).display") == "none",
-       "使えなければパネルを引っ込めて単体動作に戻る")
+    # 黙って消すと「機能が無い」のか「繋がっていない」のか分からないので、
+    # パネルは出したまま理由を書く（保存はしないので単体動作と同じ）
+    ck(pg.eval_on_selector("#navBox", "e=>getComputedStyle(e).display") != "none",
+       "パネルは出したままにする")
+    ck("保存先に接続できません" in msg(pg), "理由が書いてある: %s" % msg(pg))
+    ck("boom" in msg(pg), "元の例外の文言も出る: %s" % msg(pg))
+    ck(pg.eval_on_selector("#navMsg", "e=>e.className") == "err", "エラー色")
     ck(errs == [], "JS エラーなし %s" % errs)
     ctx.close()
     b.close()
