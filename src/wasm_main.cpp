@@ -1,6 +1,7 @@
 // The WebAssembly boundary.  The page owns the DOM, file pickers and PNG
 // encoding (canvas.toBlob); everything else - drawing, hit-testing, the
 // document, save and load - lives on this side.
+#include <limits>
 #include <emscripten.h>
 
 #include <cstddef>
@@ -61,6 +62,28 @@ EMSCRIPTEN_KEEPALIVE void cp_set_marker(float r) {
     g_app.markDirty();
 }
 EMSCRIPTEN_KEEPALIVE float cp_get_marker(void) { return g_app.doc.markerSize; }
+
+// This floor's position.  NaN means "not set", both ways - it keeps the pair
+// of calls symmetrical and needs no second "is it there" export.  Out of range
+// clears, so a typo cannot put a camera in the sea.
+// No pushHistory: undo covers what is drawn, and a typed-in coordinate is not
+// something anyone expects Ctrl+Z to take back.
+EMSCRIPTEN_KEEPALIVE double cp_get_lat(void) {
+    return g_app.doc.lat ? *g_app.doc.lat
+                         : std::numeric_limits<double>::quiet_NaN();
+}
+EMSCRIPTEN_KEEPALIVE double cp_get_lon(void) {
+    return g_app.doc.lon ? *g_app.doc.lon
+                         : std::numeric_limits<double>::quiet_NaN();
+}
+EMSCRIPTEN_KEEPALIVE void cp_set_lat(double v) {
+    if (v >= -90 && v <= 90) g_app.doc.lat = v;
+    else g_app.doc.lat.reset();
+}
+EMSCRIPTEN_KEEPALIVE void cp_set_lon(double v) {
+    if (v >= -180 && v <= 180) g_app.doc.lon = v;
+    else g_app.doc.lon.reset();
+}
 EMSCRIPTEN_KEEPALIVE int cp_camera_at(float x, float y) {
     return g_app.cameraNumberAtScreen(x, y);
 }

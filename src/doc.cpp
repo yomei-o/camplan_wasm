@@ -161,6 +161,21 @@ void appendNumber(std::string & out, float v) {
     out += s;
 }
 
+// Degrees need far more decimals than pixels do: %.2f would land a camera
+// in the next town.  Seven keeps centimetres and still trims clean.
+void appendDegrees(std::string & out, double v) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.7f", v);
+    std::string s = buf;
+    while (s.find('.') != std::string::npos &&
+           (s.back() == '0' || s.back() == '.')) {
+        const bool dot = s.back() == '.';
+        s.pop_back();
+        if (dot) break;
+    }
+    out += s;
+}
+
 void appendString(std::string & out, const std::string & s) {
     out.push_back('"');
     for (char c : s) {
@@ -197,6 +212,14 @@ struct Parser {
         ws();
         char * next = nullptr;
         out = std::strtof(p, &next);
+        if (next == p) return false;
+        p = next;
+        return true;
+    }
+    bool numberD(double & out) {
+        ws();
+        char * next = nullptr;
+        out = std::strtod(p, &next);
         if (next == p) return false;
         p = next;
         return true;
@@ -254,6 +277,14 @@ std::string Document::toJson() const {
     std::string out = "{\"app\":\"camplan\",\"version\":1";
     out += ",\"marker\":";
     appendNumber(out, markerSize);
+    if (lat) {
+        out += ",\"lat\":";
+        appendDegrees(out, *lat);
+    }
+    if (lon) {
+        out += ",\"lon\":";
+        appendDegrees(out, *lon);
+    }
     if (background) {
         out += ",\"background\":{\"name\":";
         appendString(out, background->name);
@@ -310,6 +341,14 @@ bool Document::fromJson(const std::string & text) {
             float v;
             if (!in.number(v)) return false;
             loaded.markerSize = std::min(std::max(v, 6.f), 80.f);
+        } else if (key == "lat") {
+            double v;
+            if (!in.numberD(v)) return false;
+            if (v >= -90 && v <= 90) loaded.lat = v;
+        } else if (key == "lon") {
+            double v;
+            if (!in.numberD(v)) return false;
+            if (v >= -180 && v <= 180) loaded.lon = v;
         } else if (key == "app") {
             std::string v;
             if (!in.string(v) || v != "camplan") return false;

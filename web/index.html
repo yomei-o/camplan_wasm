@@ -274,6 +274,10 @@
         <button id="flrDel" title="この階を削除">&minus;</button>
       </div>
       <div id="flrList"></div>
+      <div id="navMsg"></div>
+    </div>
+    <div id="geoBox" style="display:none">
+      <h2>LOCATION</h2>
       <div class="navrow" id="geoRow">
         <label>緯度</label>
         <input id="bldLat" class="geo" type="text" placeholder="35.6812"
@@ -282,7 +286,6 @@
         <input id="bldLon" class="geo" type="text" placeholder="139.7671"
                title="この階の経度（-180〜180）">
       </div>
-      <div id="navMsg"></div>
     </div>
     <h2>SELECTED CAMERA</h2>
     <div id="selBox" style="display:none">
@@ -428,6 +431,7 @@ createCamplan().then(function (M) {
   }
 
   function refreshPanel() {
+    showGeo();
     var no = M._cp_sel_number();
     selBox.style.display = no ? '' : 'none';
     noSel.style.display = no ? 'none' : '';
@@ -761,10 +765,6 @@ createCamplan().then(function (M) {
   var navMsg = document.getElementById('navMsg');
 
   var tree = {};          // { 建物名: [階名, ...] }
-  // 階ごとの付帯情報。いまは緯度・経度だけ。図面の JSON には入れず（C++ を
-  // 触らずに済ませるため）、"建物名/階名" と衝突しない予約キーにまとめて置く。
-  var META_KEY = '__camplan_buildings__';
-  var meta = {};          // { "建物名/階名": { lat: 数値, lon: 数値 } }
   var curBld = null;
   var curFlr = null;
   // 一時URL で ?building=...&floor=... と指定されていたら、その階を開く
@@ -804,42 +804,32 @@ createCamplan().then(function (M) {
 
   var bldLat = document.getElementById('bldLat');
   var bldLon = document.getElementById('bldLon');
+  // 緯度経度は書類の一部なので、ストレージが無くても（= 単体動作でも）使える。
+  // 建物/階のパネルとは別に、いつでも出しておく。
+  document.getElementById('geoBox').style.display = '';
 
-  function loadMeta() {
-    return Promise.resolve(store.load(META_KEY)).then(function (text) {
-      try { meta = JSON.parse(text) || {}; } catch (e) { meta = {}; }
-      if (typeof meta !== 'object' || !meta) meta = {};
-    }).catch(function () {
-      meta = {};        // まだ無いだけ。保存のときに作られる
-    });
-  }
-
-  function saveMeta() {
-    return store.save(META_KEY, JSON.stringify(meta));
-  }
-
-  function metaKey() {
-    return (curBld && curFlr) ? keyOf(curBld, curFlr) : null;
-  }
-
+  // 緯度・経度は書類の一部なので、保存 JSON にそのまま入る（ダウンロードした
+  // ファイルにも付いてくる）。C++ 側は未設定を NaN で表す。
   function showGeo() {
-    var m = meta[metaKey()] || {};
     // 入力中の欄を書き換えない
-    if (document.activeElement !== bldLat)
-      bldLat.value = (typeof m.lat === 'number') ? String(m.lat) : '';
-    if (document.activeElement !== bldLon)
-      bldLon.value = (typeof m.lon === 'number') ? String(m.lon) : '';
+    if (document.activeElement !== bldLat) {
+      var la = M._cp_get_lat();
+      var lat = isNaN(la) ? '' : String(la);
+      if (bldLat.value !== lat) bldLat.value = lat;   // 毎フレーム走るので
+    }
+    if (document.activeElement !== bldLon) {
+      var lo = M._cp_get_lon();
+      var lon = isNaN(lo) ? '' : String(lo);
+      if (bldLon.value !== lon) bldLon.value = lon;
+    }
   }
 
   // 空欄は「未設定」。数値として読めない、または範囲外なら拒否して戻す。
-  function geoChanged(which, input, limit) {
+  function geoChanged(which, input, limit, set) {
     return function () {
-      var key = metaKey();
-      if (!store || store.readOnly || !key) return;
       var text = input.value.trim();
-      var m = meta[key] || (meta[key] = {});
       if (text === '') {
-        delete m[which];
+        set(NaN);                       // NaN で未設定に戻る
       } else {
         var v = Number(text);
         if (!isFinite(v) || v < -limit || v > limit) {
@@ -848,17 +838,17 @@ createCamplan().then(function (M) {
           showGeo();
           return;
         }
-        m[which] = v;
+        set(v);
       }
-      if (!m.lat && m.lat !== 0 && !m.lon && m.lon !== 0) delete meta[key];
-      say('保存中…');
-      saveMeta().then(function () {
-        say(key + ' の位置を保存しました');
-      }).catch(fail);
+      // 絵が変わらない編集なので cp_dirty では拾えない
+      touch();
+      say('');           // 前のエラー表示を消す
     };
   }
-  bldLat.onchange = geoChanged('lat', bldLat, 90);
-  bldLon.onchange = geoChanged('lon', bldLon, 180);
+  bldLat.onchange = geoChanged('lat', bldLat, 90,
+                               function (v) { M._cp_set_lat(v); });
+  bldLon.onchange = geoChanged('lon', bldLon, 180,
+                               function (v) { M._cp_set_lon(v); });
 
   function renderNav() {
     bldSel.innerHTML = '';
@@ -870,7 +860,6 @@ createCamplan().then(function (M) {
       bldSel.appendChild(o);
     });
     refreshShareUrl();
-    showGeo();
     flrList.innerHTML = '';
     (tree[curBld] || []).forEach(function (f) {
       var row = document.createElement('div');
@@ -1007,11 +996,6 @@ createCamplan().then(function (M) {
     Promise.all(floors.map(function (f) { return store.remove(keyOf(gone, f)); }))
       .then(function () {
         delete tree[gone];
-        var dropped = false;
-        floors.forEach(function (f) {
-          if (meta[keyOf(gone, f)]) { delete meta[keyOf(gone, f)]; dropped = true; }
-        });
-        if (dropped) saveMeta().catch(function () { });
         curBld = null; curFlr = null; syncedJson = null;
         busy = false;
         var next = Object.keys(tree).sort()[0];
@@ -1045,7 +1029,6 @@ createCamplan().then(function (M) {
     clearTimeout(saveTimer);
     say('削除中…');
     store.remove(keyOf(b, f)).then(function () {
-      if (meta[keyOf(b, f)]) { delete meta[keyOf(b, f)]; saveMeta().catch(function () { }); }
       tree[b] = floors.filter(function (x) { return x !== f; });
       curFlr = null; syncedJson = null;
       busy = false;
@@ -1136,11 +1119,11 @@ createCamplan().then(function (M) {
     // URL がまだなら先に発行する。通報する場面で二度手間にしない。
     var step = issuedBase ? Promise.resolve(shareUrlBox.value) : issueUrl();
     step.then(function (url) {
-      var m = meta[metaKey()] || {};
+      var la = M._cp_get_lat(), lo = M._cp_get_lon();
       var info = {
         url: url, building: curBld, floor: curFlr,
-        lat: (typeof m.lat === 'number') ? m.lat : null,
-        lon: (typeof m.lon === 'number') ? m.lon : null
+        lat: isNaN(la) ? null : la,
+        lon: isNaN(lo) ? null : lo
       };
       if (window.onReport) {
         window.onReport(url, info);
@@ -1179,8 +1162,6 @@ createCamplan().then(function (M) {
     say('読み込み中…');
     store.list().then(function (items) {
       buildTree(items);
-      return loadMeta().then(function () { return items; });
-    }).then(function (items) {
       var blds = Object.keys(tree).sort();
       // 一時URL で建物と階を指定されていたら、それを開く。消えていたら先頭に戻す。
       if (wantBld && wantFlr && tree[wantBld] &&

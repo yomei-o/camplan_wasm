@@ -23,6 +23,21 @@ rapidsos-proto（社内の Lambda サーバ）の `src/web/camplan_wasm` に sub
 入っている。将来そちら側で `camplanStorage` を object API の `kv_*` に繋いで、
 OIDC ログイン後のページを camplan にする予定。camplan 単体でも動くのはそのため。
 
+## 状態 (2026-09-14 その2)
+
+一時URLの発行・通報ボタン・階ごとの緯度経度を足した。**ここで初めて C++ を
+触った**（緯度経度）ので、docs/camplan.js を作り直してある。
+
+- **一時URL / 通報** — ページ側が `window.camplanShare.issue()` を用意した
+  ときだけヘッダに出る。発行した URL に camplan が `&building=…&floor=…` を
+  足すので、受け取った人は発行時に見ていた階が開く。通報は
+  `window.onReport(url, info)`（未定義なら alert）。
+  `camplanStorage.readOnly` が真なら共有ボタンを出さず、編集 UI と自動保存も止める。
+- **緯度・経度** — `Document::lat` / `lon`（`std::optional<double>`）。
+  最初はページ側の予約キーに置いていたが、ダウンロードした JSON に入らないので
+  C++ に移した。未設定は NaN で表す（`cp_get_lat` が NaN を返し、
+  `cp_set_lat(NaN)` で未設定に戻る）。undo では戻らない。
+
 ## 状態 (2026-09-09)
 
 カメラに任意の文字列プロパティ（キー/値）を持てるようにした。番号は今まで通り

@@ -144,6 +144,45 @@ int main(int argc, char ** argv) {
         }
     }
 
+    // The floor's position.  It rides in the JSON, so a downloaded file knows
+    // where its floor is.  double, not float - a float latitude rounds to
+    // about a metre.
+    {
+        Document geo;
+        if (geo.toJson().find("\"lat\"") != std::string::npos) {
+            std::fprintf(stderr, "geo: unset must not be written\n");
+            return 1;
+        }
+        geo.lat = 35.6812345;
+        geo.lon = 139.7671248;
+        const std::string text = geo.toJson();
+        Document back;
+        if (!back.fromJson(text) || !back.lat || !back.lon ||
+            *back.lat != 35.6812345 || *back.lon != 139.7671248 ||
+            back.toJson() != text) {
+            std::fprintf(stderr, "geo: round trip differs\n");
+            return 1;
+        }
+        // Out of range is dropped, and a file written before this existed
+        // still loads.
+        Document bad;
+        if (!bad.fromJson("{\"app\":\"camplan\","
+                          "\"lat\":999,\"lon\":-500,"
+                          "\"walls\":[],\"cameras\":[]}") ||
+            bad.lat || bad.lon) {
+            std::fprintf(stderr, "geo: out of range must be dropped\n");
+            return 1;
+        }
+        Document older;
+        if (!older.fromJson("{\"app\":\"camplan\","
+                            "\"version\":1,\"marker\":16,"
+                            "\"walls\":[],\"cameras\":[]}") ||
+            older.lat) {
+            std::fprintf(stderr, "geo: an older file must still load\n");
+            return 1;
+        }
+    }
+
     // The background: a real JPEG, decoded on this side, and still decodable
     // after a trip through the JSON (which carries the file, not the pixels).
     std::vector<uint8_t> jpeg;

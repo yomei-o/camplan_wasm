@@ -54,6 +54,12 @@ struct Document {
     std::vector<Wall> walls;
     std::vector<Camera> cameras;
     float markerSize = 16;   // the numbered disc's radius, world pixels
+    // Where this floor is, for whoever is on their way to it.  Either both are
+    // set or neither is useful, but they are edited one field at a time, so
+    // each stands on its own.  Degrees, WGS84.  double, not float: a float
+    // latitude rounds to about a metre, and these are read by a dispatcher.
+    std::optional<double> lat;   // -90..90
+    std::optional<double> lon;   // -180..180
 
     // Decodes the file and makes it the background.  Returns false when the
     // bytes are not a readable image, and then the old background stays.
