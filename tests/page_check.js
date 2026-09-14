@@ -138,12 +138,14 @@ function client(ws) {
             type, x, y, button: 'left', clickCount: clicks || 1,
             buttons: type === 'mouseReleased' ? 0 : 1,
         });
-        const keys = () => js(
-            `Array.from(document.querySelectorAll('#pKv input.k'))` +
-            `.map(function (i) { return i.value; })`);
+        const labels = () => js(
+            `Array.from(document.querySelectorAll('#pKv label'))` +
+            `.map(function (i) { return i.textContent; })`);
         const inputs = () => js(
             `Array.from(document.querySelectorAll('#pKv input'))` +
             `.map(function (i) { return i.value; })`);
+        // The four fields are fixed and always in this order, so index them.
+        const field = (n) => `#pKv input:nth-of-type(${n + 1})`;
         const typeInto = (sel, value) => js(
             `(function () { var el = document.querySelector(` +
             `${JSON.stringify(sel)}); el.value = ${JSON.stringify(value)};` +
@@ -174,23 +176,21 @@ function client(ws) {
         check('onCameraSelect fired', await js(`window.sel[0]`), 1);
         check('with no properties yet', await js(`window.sel[1]`), {});
 
-        // Two property rows, then type into them.
-        await js(`document.getElementById('kvAdd').click()`);
+        // The properties are a fixed set of four; type into each one.
+        check('the four fixed fields', await labels(),
+              ['名前', 'デバイスID', 'APIキー', 'コメント']);
+        check('empty to start', await inputs(), ['', '', '', '']);
+        await typeInto(field(0), 'エントランス');
         await sleep(150);
-        await js(`document.getElementById('kvAdd').click()`);
+        await typeInto(field(1), 'dev-123');
         await sleep(150);
-        check('default keys', await keys(), ['key1', 'key2']);
-        await typeInto('#pKv input.k', 'url');
+        await typeInto(field(2), 'key-abc');
         await sleep(150);
-        await typeInto('#pKv input:not(.k)', 'rtsp://cam1/main');
-        await sleep(150);
-        await typeInto('#pKv > *:nth-child(4)', '室名');
-        await sleep(150);
-        await typeInto('#pKv > *:nth-child(5)', 'エントランス');
+        await typeInto(field(3), '受付の上');
         await sleep(300);
 
-        // Deselect, select again: the rows are rebuilt from the C++ side, so
-        // what shows up now is what was really stored.
+        // Deselect, select again: the fields are refilled from the C++ side,
+        // so what shows up now is what was really stored.
         await js(`document.getElementById('m0').click()`);
         await mouse('mousePressed', Math.round(box.x + 20),
                     Math.round(box.y + 20));
@@ -200,18 +200,11 @@ function client(ws) {
         check('deselecting tells the page', await js(`window.sel[0]`), 0);
         await js(`document.querySelector('#camList .chip').click()`);
         await sleep(400);
-        check('the rows come back from C++', await inputs(),
-              ['url', 'rtsp://cam1/main', '室名', 'エントランス']);
+        check('the values come back from C++', await inputs(),
+              ['エントランス', 'dev-123', 'key-abc', '受付の上']);
         check('and so do the properties', await js(`window.sel[1]`),
-              { url: 'rtsp://cam1/main', '室名': 'エントランス' });
-
-        // A duplicate key is refused and the input snaps back.
-        await js(`window.said = null;
-                  window.alert = function (m) { window.said = m; };`);
-        await typeInto('#pKv > *:nth-child(4)', 'url');
-        await sleep(300);
-        check('a duplicate key is refused', (await keys())[1], '室名');
-        check('and the user is told', await js(`typeof window.said`), 'string');
+              { name: 'エントランス', device_id: 'dev-123',
+                api_key: 'key-abc', comment: '受付の上' });
 
         // Double click: the same object, as the cue to open the video.
         await mouse('mousePressed', cx, cy, 2);
@@ -219,13 +212,14 @@ function client(ws) {
         await sleep(400);
         check('onCameraOpen number', await js(`window.open_[0]`), 1);
         check('onCameraOpen props', await js(`window.open_[1]`),
-              { url: 'rtsp://cam1/main', '室名': 'エントランス' });
+              { name: 'エントランス', device_id: 'dev-123',
+                api_key: 'key-abc', comment: '受付の上' });
 
-        // Delete a row, then take it back with Ctrl+Z.  Undo drops the
-        // selection (it always has), so the camera has to be picked again.
-        await js(`document.querySelector('#pKv button').click()`);
+        // Clear a field, then take the value back with Ctrl+Z.  Undo drops
+        // the selection (it always has), so the camera has to be picked again.
+        await typeInto(field(3), '');
         await sleep(300);
-        check('the row is gone', await keys(), ['室名']);
+        check('the field is cleared', (await inputs())[3], '');
         await js(`document.getElementById('view').focus()`);
         for (const type of ['keyDown', 'keyUp'])
             await send('Input.dispatchKeyEvent', {
@@ -235,7 +229,8 @@ function client(ws) {
         await sleep(400);
         await js(`document.querySelector('#camList .chip').click()`);
         await sleep(400);
-        check('undo brings it back', await keys(), ['url', '室名']);
+        check('undo brings it back', await inputs(),
+              ['エントランス', 'dev-123', 'key-abc', '受付の上']);
 
         // Nothing on the page may have thrown.  A missing favicon is the
         // server's business, not the page's.

@@ -107,7 +107,8 @@
     font: inherit;
   }
   .props input[type=range] { width: 100%; accent-color: var(--cyan); }
-  #pKv { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; }
+  #pKv { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
+  #pKv label { color: var(--muted); white-space: nowrap; }
   #pKv input {
     min-width: 0;
     background: #061020;
@@ -117,15 +118,54 @@
     padding: 3px 5px;
     font: inherit;
   }
-  #pKv input.k { color: var(--cyan); }
-  #pKv button {
-    padding: 2px 6px;
-    color: var(--muted);
-    border-color: transparent;
+  #playerWrap {
+    position: fixed; inset: 0; z-index: 50;
+    display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .72);
   }
-  #pKv button:hover { color: #ff8a9a; border-color: #5a2530; box-shadow: none; }
-  #kvAdd { width: 100%; margin-top: 6px; }
-  #kvNone { color: var(--muted); }
+  #playerBox {
+    background: var(--panel);
+    border: 1px solid var(--cyan-dim);
+    border-radius: 6px;
+    padding: 10px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .6);
+    max-width: 92vw;
+  }
+  #playerHead {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  #playerTitle { color: var(--cyan); flex: 1 1 auto; }
+  #playerView {
+    width: 768px; max-width: 88vw; aspect-ratio: 16 / 9;
+    background: #000;
+  }
+  #playerMsg { color: var(--muted); margin-top: 6px; min-height: 1.2em; }
+  #playerMsg.err { color: #ff8a9a; }
+  #navBox { margin-bottom: 4px; }
+  .navrow { display: flex; gap: 6px; align-items: center; }
+  .navrow select {
+    flex: 1 1 auto; min-width: 0;
+    padding: 3px 4px;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 4px;
+    font: inherit;
+  }
+  .navrow button { padding: 3px 8px; }
+  #flrList { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+  #flrList .row {
+    padding: 4px 8px;
+    border: 1px solid var(--cyan-dim); border-radius: 4px;
+    color: var(--cyan); cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #flrList .row.on {
+    background: var(--amber); border-color: var(--amber);
+    color: #201400; box-shadow: 0 0 10px rgba(255,190,60,.6);
+  }
+  #navMsg { color: var(--muted); margin-top: 6px; }
+  #navMsg.err { color: #ff8a9a; }
   #camList { display: flex; flex-wrap: wrap; gap: 6px; }
   #camList .chip {
     min-width: 30px; text-align: center;
@@ -168,13 +208,28 @@
   <label class="filebtn">下絵を開く<input type="file" id="bgFile" accept="image/*" hidden></label>
   <button id="bgClear">下絵を消す</button>
   <span class="sep"></span>
-  <button id="save">保存</button>
+  <button id="save">ダウンロード</button>
   <label class="filebtn">開く<input type="file" id="openFile" accept=".json,.camplan" hidden></label>
   <button id="png">PNG出力</button>
 </header>
 <main>
   <div id="stage"><canvas id="view" tabindex="0"></canvas></div>
   <aside>
+    <div id="navBox" style="display:none">
+      <h2>BUILDING</h2>
+      <div class="navrow">
+        <select id="bldSel"></select>
+        <button id="bldAdd" title="建物を追加">+</button>
+        <button id="bldDel" title="この建物を削除">&minus;</button>
+      </div>
+      <h2>FLOOR</h2>
+      <div class="navrow">
+        <button id="flrAdd" title="階を追加">+ 階を追加</button>
+        <button id="flrDel" title="この階を削除">&minus;</button>
+      </div>
+      <div id="flrList"></div>
+      <div id="navMsg"></div>
+    </div>
     <h2>SELECTED CAMERA</h2>
     <div id="selBox" style="display:none">
       <div class="props">
@@ -187,8 +242,6 @@
       </div>
       <h2>PROPERTIES</h2>
       <div id="pKv"></div>
-      <div id="kvNone">プロパティなし</div>
-      <button id="kvAdd">+ 行を追加</button>
       <button id="delBtn">このカメラを削除</button>
     </div>
     <div id="noSel">カメラをクリックで選択</div>
@@ -201,6 +254,16 @@
     </div>
   </aside>
 </main>
+<div id="playerWrap">
+  <div id="playerBox">
+    <div id="playerHead">
+      <span id="playerTitle"></span>
+      <button id="playerClose">閉じる</button>
+    </div>
+    <div id="playerView"></div>
+    <div id="playerMsg"></div>
+  </div>
+</div>
 <footer id="hint">V:選択 C:カメラ W:壁 E:消去 F:全体 Ctrl+Z:戻す Ctrl+Y:やり直し Del:削除 / 追加: クリック→ドラッグで向き / 壁: クリックで頂点、Enterで確定 / ホイール: ズーム</footer>
 
 <script src="camplan.js"></script>
@@ -244,10 +307,9 @@ createCamplan().then(function (M) {
   var pRange = document.getElementById('pRange');
   var pRangeN = document.getElementById('pRangeN');
 
-  /* Free-form properties.  Strings cross the boundary as UTF-8 on the wasm
+  /* Camera properties.  Strings cross the boundary as UTF-8 on the wasm
      heap, so every one of them has to be freed again. */
   var pKv = document.getElementById('pKv');
-  var kvNone = document.getElementById('kvNone');
   var kvShown = null;   // what the rows currently show, to avoid rebuilding
 
   function withStrings(fn, strings) {
@@ -267,61 +329,49 @@ createCamplan().then(function (M) {
     try { return JSON.parse(M.UTF8ToString(M._cp_camera_props(no))); }
     catch (err) { return {}; }
   }
+  // カメラのプロパティは固定 4 項目。C++ 側は任意のキーを持てるが、
+  // UI からはこの 4 つだけを読み書きする（他のキーがあっても壊さない）。
+  var PROP_FIELDS = [
+    { key: 'name',      label: '名前' },
+    { key: 'device_id', label: 'デバイスID' },
+    { key: 'api_key',   label: 'APIキー' },
+    { key: 'comment',   label: 'コメント' }
+  ];
+  var propInputs = null;
+
+  function buildPropRows() {
+    propInputs = {};
+    pKv.innerHTML = '';
+    PROP_FIELDS.forEach(function (f) {
+      var lab = document.createElement('label');
+      lab.textContent = f.label;
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.title = f.label;
+      inp.onchange = function () {
+        withStrings(M._cp_sel_set_prop, [f.key, inp.value]);
+        kvShown = null;
+        panelStale = true;
+        touch();     // 絵が変わらない編集なので cp_dirty では拾えない
+      };
+      pKv.appendChild(lab);
+      pKv.appendChild(inp);
+      propInputs[f.key] = inp;
+    });
+  }
+
   function refreshProps(no) {
     var rows = readProps();
     var sig = JSON.stringify([no, rows]);
     if (sig === kvShown) return;
-    // Never pull the rows out from under someone who is typing in them.
+    // Never pull the values out from under someone who is typing in them.
     if (pKv.contains(document.activeElement)) return;
     kvShown = sig;
-    kvNone.style.display = rows.length ? 'none' : '';
-    pKv.innerHTML = '';
-    rows.forEach(function (row) {
-      var key = row[0];
-      var k = document.createElement('input');
-      k.type = 'text';
-      k.className = 'k';
-      k.value = key;
-      k.title = 'キー';
-      k.onchange = function () {
-        if (!withStrings(M._cp_sel_rename_prop, [key, k.value])) {
-          k.value = key;
-          alert('キーが空か、すでに使われています');
-        }
-        kvShown = null;
-        panelStale = true;
-      };
-      var v = document.createElement('input');
-      v.type = 'text';
-      v.value = row[1];
-      v.title = '値';
-      v.onchange = function () {
-        withStrings(M._cp_sel_set_prop, [key, v.value]);
-        kvShown = null;
-        panelStale = true;
-      };
-      var del = document.createElement('button');
-      del.textContent = '×';
-      del.title = 'この行を削除';
-      del.onclick = function () {
-        withStrings(M._cp_sel_remove_prop, [key]);
-        kvShown = null;
-        panelStale = true;
-      };
-      pKv.appendChild(k);
-      pKv.appendChild(v);
-      pKv.appendChild(del);
-    });
+    if (!propInputs) buildPropRows();
+    var map = {};
+    rows.forEach(function (row) { map[row[0]] = row[1]; });
+    PROP_FIELDS.forEach(function (f) { propInputs[f.key].value = map[f.key] || ''; });
   }
-  document.getElementById('kvAdd').onclick = function () {
-    var used = {};
-    readProps().forEach(function (row) { used[row[0]] = true; });
-    var i = 1;
-    while (used['key' + i]) i++;
-    withStrings(M._cp_sel_set_prop, ['key' + i, '']);
-    kvShown = null;
-    panelStale = true;
-  };
 
   function refreshPanel() {
     var no = M._cp_sel_number();
@@ -448,11 +498,16 @@ createCamplan().then(function (M) {
     window.dispatchEvent(new CustomEvent('camplan:camera',
         { detail: { number: no, props: props } }));
     if (window.onCameraOpen) window.onCameraOpen(no, props);
-    else alert('カメラ ' + no + ' の映像を表示（ここにプレーヤーを接続）\n' +
-               JSON.stringify(props));
+    else if (props.device_id && props.api_key) openPlayer(no, props);
+    else alert('カメラ ' + no + ' にデバイスIDとAPIキーを設定すると映像が見られます');
     e.preventDefault();
   });
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && playerWrap.style.display === 'flex') {
+      closePlayer();
+      e.preventDefault();
+      return;
+    }
     if (e.target.tagName === 'INPUT') return;
     if (e.ctrlKey || e.metaKey) {
       var k = e.key.toLowerCase();
@@ -511,11 +566,25 @@ createCamplan().then(function (M) {
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
   }
-  document.getElementById('save').onclick = function () {
+  // 文字列のやりとりは loadJsonFile と同じ手（alloc して HEAPU8 に置く）。
+  // lengthBytesUTF8 は EXPORTED_RUNTIME_METHODS に入っていないので使わない。
+  function currentJson() {
     var ptr = M._cp_save();
     var size = M._cp_save_size();
-    var text = new Uint8Array(M.HEAPU8.buffer, ptr, size).slice();
-    download(new Blob([text], { type: 'application/json' }), 'camplan.json');
+    return new TextDecoder().decode(new Uint8Array(M.HEAPU8.buffer, ptr, size));
+  }
+  function loadJsonText(text) {
+    var bytes = new TextEncoder().encode(text);
+    var p = M._cp_alloc(bytes.length);
+    M.HEAPU8.set(bytes, p);
+    var ok = M._cp_load(p, bytes.length);
+    M._cp_free(p);
+    if (ok) panelStale = true;
+    return !!ok;
+  }
+  document.getElementById('save').onclick = function () {
+    download(new Blob([currentJson()], { type: 'application/json' }),
+             (curBld ? curBld + '_' + curFlr : 'camplan') + '.json');
   };
   function loadJsonFile(file) {
     file.arrayBuffer().then(function (buf) {
@@ -534,6 +603,327 @@ createCamplan().then(function (M) {
     if (e.target.files[0]) loadJsonFile(e.target.files[0]);
     e.target.value = '';
   };
+
+  /* ----------------------------------------------------- safie player
+
+     カメラのプロパティに device_id と api_key が両方入っていれば、
+     ダブルクリックで Safie SDK の映像を出す。SDK はそのとき初めて
+     読み込む（単体・オフラインでの起動を重くしないため）。
+
+     ページ側が window.onCameraOpen を定義していればそちらが優先される
+     ので、別のプレーヤーを差し込みたいときは従来どおりにできる。       */
+
+  var SAFIE_SDK_URL = 'https://safie.link/sdk/js/api/v1/latest/';
+  var sdkLoading = null;
+  var player = null;
+  var playerWrap = document.getElementById('playerWrap');
+  var playerView = document.getElementById('playerView');
+  var playerTitle = document.getElementById('playerTitle');
+  var playerMsg = document.getElementById('playerMsg');
+
+  function loadSafieSdk() {
+    if (window.Safie) return Promise.resolve();
+    if (sdkLoading) return sdkLoading;
+    sdkLoading = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = SAFIE_SDK_URL;
+      s.onload = function () {
+        window.Safie ? resolve() : reject(new Error('SDK を読み込めませんでした'));
+      };
+      s.onerror = function () { reject(new Error('SDK を読み込めませんでした')); };
+      document.head.appendChild(s);
+    });
+    sdkLoading.catch(function () { sdkLoading = null; });   // 次回やり直せるように
+    return sdkLoading;
+  }
+
+  function stopPlayer() {
+    if (player && player.stop) {
+      try { player.stop(); } catch (e) { /* 停止できなくても閉じる */ }
+    }
+    player = null;
+    playerView.innerHTML = '';
+  }
+
+  function closePlayer() {
+    stopPlayer();
+    playerWrap.style.display = 'none';
+    playerMsg.textContent = '';
+    playerMsg.className = '';
+  }
+
+  document.getElementById('playerClose').onclick = closePlayer;
+  playerWrap.addEventListener('click', function (e) {
+    if (e.target === playerWrap) closePlayer();   // 外側をクリックで閉じる
+  });
+
+  function openPlayer(no, props) {
+    var deviceId = props.device_id || '';
+    var apiKey = props.api_key || '';
+    var name = props.name || '';
+    stopPlayer();
+    playerWrap.style.display = 'flex';
+    playerTitle.textContent = 'カメラ ' + no + (name ? ' - ' + name : '');
+    playerMsg.textContent = '接続中…';
+    playerMsg.className = '';
+    loadSafieSdk().then(function () {
+      return Safie.Auth.setToken(apiKey, 'apiKey');
+    }).then(function () {
+      player = new Safie.Player.StreamingPlayer(playerView);
+      player.deviceId = deviceId;
+      return player.play();
+    }).then(function () {
+      playerMsg.textContent = '';
+    }).catch(function (e) {
+      playerMsg.textContent = '映像を再生できませんでした: ' + ((e && e.message) || e);
+      playerMsg.className = 'err';
+      console.error('safie player:', e);
+    });
+  }
+
+  /* ------------------------------------------------- buildings / floors
+
+     ページ側が window.camplanStorage を用意したときだけ有効になる。
+     camplan 自身は保存先が何かを知らない（KV でもファイルでも良い）。
+
+       list()          -> Promise<[{key, size}]>   key は "建物名/階名"
+       load(key)       -> Promise<string>          保存 JSON
+       save(key, json) -> Promise<void>
+       remove(key)     -> Promise<void>
+
+     建物と階はキーそのものから組み立てる。階を持たない建物は存在しない
+     （建物を作ると 1F が自動でできる）。保存は自動 — 編集が止まってから
+     少し待って、中身が変わっていれば書き戻す。                         */
+
+  var store = window.camplanStorage || null;
+  var DEFAULT_BUILDING = 'サンプル株式会社';
+  var DEFAULT_FLOOR = '1F';
+  var AUTOSAVE_IDLE_MS = 1500;
+
+  var navBox = document.getElementById('navBox');
+  var bldSel = document.getElementById('bldSel');
+  var flrList = document.getElementById('flrList');
+  var navMsg = document.getElementById('navMsg');
+
+  var tree = {};          // { 建物名: [階名, ...] }
+  var curBld = null;
+  var curFlr = null;
+  var syncedJson = null;  // 最後に保存/読込した JSON。変化の判定に使う
+  var saveTimer = null;
+  var saving = false;
+  var busy = false;       // 読み込み・作成・削除の最中は自動保存を止める
+
+  function keyOf(b, f) { return b + '/' + f; }
+  function splitKey(k) {
+    var i = k.indexOf('/');
+    return (i <= 0 || i === k.length - 1) ? null : [k.slice(0, i), k.slice(i + 1)];
+  }
+  function say(text, cls) {
+    navMsg.textContent = text || '';
+    navMsg.className = cls || '';
+  }
+  function fail(e) { busy = false; say((e && e.message) || String(e), 'err'); }
+
+  function buildTree(items) {
+    tree = {};
+    (items || []).forEach(function (it) {
+      var kv = splitKey(it.key);
+      if (!kv) return;                      // "/" を含まないキーは建物/階ではない
+      (tree[kv[0]] = tree[kv[0]] || []).push(kv[1]);
+    });
+    Object.keys(tree).forEach(function (b) { tree[b].sort(); });
+  }
+
+  function renderNav() {
+    bldSel.innerHTML = '';
+    Object.keys(tree).sort().forEach(function (b) {
+      var o = document.createElement('option');
+      o.value = b;
+      o.textContent = b;
+      if (b === curBld) o.selected = true;
+      bldSel.appendChild(o);
+    });
+    flrList.innerHTML = '';
+    (tree[curBld] || []).forEach(function (f) {
+      var row = document.createElement('div');
+      row.className = 'row' + (f === curFlr ? ' on' : '');
+      row.textContent = f;
+      row.onclick = function () { selectFloor(curBld, f); };
+      flrList.appendChild(row);
+    });
+  }
+
+  /* ---- 自動保存 ---- */
+
+  // 編集が止まってから書き戻す。図面画像を含む JSON を毎回作るのは重いので、
+  // 描画が更新された（= 何か操作があったかもしれない）ときだけ動かす。
+  function touch() {
+    if (!store || !curBld || !curFlr || busy) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(autoSave, AUTOSAVE_IDLE_MS);
+  }
+
+  function autoSave() {
+    if (!store || !curBld || !curFlr || busy || saving) return;
+    var json = currentJson();
+    if (json === syncedJson) return;        // 見た目が動いただけ（パン/ズーム等）
+    var key = keyOf(curBld, curFlr);
+    saving = true;
+    say('保存中…');
+    store.save(key, json).then(function () {
+      saving = false;
+      syncedJson = json;
+      say(key + ' に保存しました');
+    }).catch(function (e) { saving = false; fail(e); });
+  }
+
+  // 切り替え・削除の前に、溜まっている変更を確実に書き戻す
+  function flush() {
+    if (!store || !curBld || !curFlr) return Promise.resolve();
+    clearTimeout(saveTimer);
+    var json = currentJson();
+    if (json === syncedJson) return Promise.resolve();
+    var key = keyOf(curBld, curFlr);
+    return store.save(key, json).then(function () { syncedJson = json; });
+  }
+
+  /* ---- 操作 ---- */
+
+  function selectFloor(b, f) {
+    if (b === curBld && f === curFlr) return Promise.resolve();
+    busy = true;
+    say('読み込み中…');
+    return flush().then(function () {
+      return store.load(keyOf(b, f));
+    }).then(function (json) {
+      if (!json || !loadJsonText(json)) throw new Error('この階のデータは読めませんでした');
+      curBld = b; curFlr = f; syncedJson = json;
+      busy = false;
+      renderNav();
+      say('');
+    }).catch(fail);
+  }
+
+  // 空の図面の JSON。新しい階はこれで作る。
+  function emptyJson() {
+    var keep = currentJson();
+    loadJsonText('{"cameras":[],"walls":[]}');
+    var empty = currentJson();
+    loadJsonText(keep);
+    return empty;
+  }
+
+  function askName(title) {
+    var s = prompt(title, '');
+    if (s === null) return null;
+    s = s.trim();
+    if (!s) { say('名前を入力してください', 'err'); return null; }
+    if (s.indexOf('/') >= 0) { say('名前に / は使えません', 'err'); return null; }
+    return s;
+  }
+
+  function createFloor(b, f) {
+    var empty = emptyJson();
+    return store.save(keyOf(b, f), empty).then(function () {
+      (tree[b] = tree[b] || []).push(f);
+      tree[b].sort();
+      curBld = b; curFlr = f; syncedJson = empty;
+      loadJsonText(empty);
+      busy = false;
+      renderNav();
+      say(keyOf(b, f) + ' を作りました');
+    });
+  }
+
+  document.getElementById('bldAdd').onclick = function () {
+    var name = askName('建物名');
+    if (name === null) return;
+    if (tree[name]) { say('その建物はすでにあります', 'err'); return; }
+    busy = true;
+    say('作成中…');
+    flush().then(function () { return createFloor(name, DEFAULT_FLOOR); }).catch(fail);
+  };
+
+  document.getElementById('bldDel').onclick = function () {
+    if (!curBld) return;
+    if (Object.keys(tree).length <= 1) { say('最後の建物は削除できません', 'err'); return; }
+    var gone = curBld;
+    var floors = (tree[gone] || []).slice();
+    if (!confirm(gone + ' を階ごと削除します（' + floors.length + '階）。よろしいですか？')) return;
+    busy = true;
+    clearTimeout(saveTimer);
+    say('削除中…');
+    Promise.all(floors.map(function (f) { return store.remove(keyOf(gone, f)); }))
+      .then(function () {
+        delete tree[gone];
+        curBld = null; curFlr = null; syncedJson = null;
+        busy = false;
+        var next = Object.keys(tree).sort()[0];
+        return selectFloor(next, tree[next][0]);
+      })
+      .then(function () { say(gone + ' を削除しました'); })
+      .catch(fail);
+  };
+
+  document.getElementById('flrAdd').onclick = function () {
+    if (!curBld) return;
+    var name = askName('階名');
+    if (name === null) return;
+    if ((tree[curBld] || []).indexOf(name) >= 0) { say('その階はすでにあります', 'err'); return; }
+    var b = curBld;
+    busy = true;
+    say('作成中…');
+    flush().then(function () { return createFloor(b, name); }).catch(fail);
+  };
+
+  document.getElementById('flrDel').onclick = function () {
+    if (!curBld || !curFlr) return;
+    var floors = tree[curBld] || [];
+    if (floors.length <= 1) {
+      say('最後の階は削除できません（建物ごと削除してください）', 'err');
+      return;
+    }
+    var b = curBld, f = curFlr;
+    if (!confirm(keyOf(b, f) + ' を削除します。よろしいですか？')) return;
+    busy = true;
+    clearTimeout(saveTimer);
+    say('削除中…');
+    store.remove(keyOf(b, f)).then(function () {
+      tree[b] = floors.filter(function (x) { return x !== f; });
+      curFlr = null; syncedJson = null;
+      busy = false;
+      return selectFloor(b, tree[b][0]);
+    }).then(function () { say(keyOf(b, f) + ' を削除しました'); }).catch(fail);
+  };
+
+  bldSel.onchange = function () {
+    var b = bldSel.value;
+    if (b === curBld) return;
+    selectFloor(b, tree[b][0]);
+  };
+
+  function initStorage() {
+    if (!store) return;                     // 単体動作。従来どおりファイル入出力のみ
+    navBox.style.display = '';
+    busy = true;
+    say('読み込み中…');
+    store.list().then(function (items) {
+      buildTree(items);
+      var blds = Object.keys(tree).sort();
+      if (!blds.length) {
+        return createFloor(DEFAULT_BUILDING, DEFAULT_FLOOR).then(function () { say(''); });
+      }
+      busy = false;
+      return selectFloor(blds[0], tree[blds[0]][0]);
+    }).catch(function (e) {
+      // ストレージが使えないなら、機能ごと引っ込めて単体動作に戻す
+      store = null;
+      busy = false;
+      navBox.style.display = 'none';
+      say('');
+      console.warn('camplanStorage is unavailable:', e);
+    });
+  }
 
   /* -------------------------------------------------------------- drop */
   ['dragover', 'dragenter'].forEach(function (t) {
@@ -589,6 +979,7 @@ createCamplan().then(function (M) {
     }
     if (M._cp_dirty()) {
       present();
+      touch();             // 何か操作があった -> 自動保存のタイマを延ばす
       if (panelStale !== false) refreshPanel();
       panelStale = true;   // handle drags updating fov/range live
     }
@@ -596,9 +987,11 @@ createCamplan().then(function (M) {
     requestAnimationFrame(frame);
   }
   M._cp_set_theme(0);
+  initStorage();
   // The demo plan, so the first visit has something to point cameras at.
   // A failure (file://, offline) just leaves the graph paper.
-  fetch('cocololo.jpg').then(function (r) {
+  // With storage the floor's own document is the starting point, so skip it.
+  if (!store) fetch('cocololo.jpg').then(function (r) {
     return r.ok ? r.blob() : null;
   }).then(function (blob) {
     if (blob && !M._cp_camera_count() && !M._cp_bg_size())

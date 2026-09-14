@@ -2,6 +2,27 @@
 
 防犯カメラ設置図エディタ。README が使い方とビルド、この文書は続きをやる人向けのメモ。
 
+## 状態 (2026-09-14)
+
+建物と階、固定プロパティ、Safie プレーヤーの3つを足した。**C++ と wasm は一行も
+触っていない** — 3つとも index.html だけで閉じている。だから docs/camplan.js は
+そのままで、`sed` で docs/index.html を作り直せば済む（build.sh の最後の1行）。
+
+- **建物/階** — ページが `window.camplanStorage`（list/load/save/remove）を置いた
+  ときだけ有効。キーは `"建物名/階名"`、値は従来の保存 JSON そのもの。camplan は
+  ストレージの実体を知らない（`onCameraOpen` と同じ、ページ側に口を開ける方式）。
+  既定は サンプル株式会社/1F、建物を作ると 1F が一緒にできる。編集が止まって
+  1.5 秒で自動保存、保存ボタンは「ダウンロード」に変えた。
+- **プロパティを4項目に固定** — 名前 / デバイスID / APIキー / コメント
+  （`name` / `device_id` / `api_key` / `comment`）。C++ 側は任意キーのままなので
+  外から入れた他のキーは壊れずに残る。UI が4つしか見せないだけ。
+- **Safie プレーヤー** — ダブルクリックで device_id と api_key が揃っていれば
+  SDK を遅延ロードして再生。`window.onCameraOpen` があればそちらが優先。
+
+rapidsos-proto（社内の Lambda サーバ）の `src/web/camplan_wasm` に submodule で
+入っている。将来そちら側で `camplanStorage` を object API の `kv_*` に繋いで、
+OIDC ログイン後のページを camplan にする予定。camplan 単体でも動くのはそのため。
+
 ## 状態 (2026-09-09)
 
 カメラに任意の文字列プロパティ（キー/値）を持てるようにした。番号は今まで通り
@@ -44,6 +65,14 @@ getImageData は使わない。JSON の中身は元から圧縮画像（base64�
 - props は文字列だけ。型を増やさない（数値が欲しいならページ側で parse する）。
   キーは一意・空不可・順序は入力順、制御文字は setProp が落とす。だから JSON の
   エスケープは `"` と `\` の2つで足り、パーサも今のままで済む。
+- UI が見せる props は `PROP_FIELDS` の4つだけ。キーは ASCII（`device_id` など）で
+  ラベルだけ日本語 — ページ側が `props.device_id` で読めるようにするため。
+  増やすときは index.html の `PROP_FIELDS` に足すだけでよく、C++ は触らない。
+- ストレージは camplan の外。`window.camplanStorage` が無ければ建物/階は
+  丸ごと出さない。camplan が `kv_set`/`kv_get` のような名前を知ってはいけない
+  （知った時点で単体で動かなくなる）。
+- Safie SDK は再生するまで読み込まない（`loadSafieSdk()` が script を挿す）。
+  映像を使わないページが外部へ通信しないように。
 - props の編集 API は行単位（set/rename/remove）で、失敗する編集は履歴を積まない。
   パネルが「全消し→全追加」をしないので、1操作＝1 undo が成り立つ。
 
@@ -58,9 +87,26 @@ getImageData は使わない。JSON の中身は元から圧縮画像（base64�
   選択が無い間 DOM に残るだけで、選択し直せば C++ 側から作り直される。
 - tests/page_check.js は docs/ を配信して headless Chrome を CDP で叩く。
   つまり **build.sh を先に走らせないと古い docs/ をテストする**。
+  tests/nav_check.py と tests/player_check.py（Playwright）も同じく docs/ を見る。
+- `M.lengthBytesUTF8` は **EXPORTED_RUNTIME_METHODS に入っていない**。文字列を
+  wasm に渡すときは TextEncoder + `_cp_alloc` + `HEAPU8.set`、読むときは
+  TextDecoder（`loadJsonFile` / `currentJson` がその形）。うっかり呼ぶと
+  例外が出て、しかも Promise の中だと黙って機能ごと消える。
+- `cp_dirty()` は **描画** の dirty であって「文書が変わった」ではない。
+  絵が変わらない編集（コメント欄など）は自動保存に拾われないので、
+  そういう場所では `touch()` を明示的に呼ぶ。
+- 階を消すと `curFlr` が null になる。`touch`/`autoSave`/`flush` の入口で
+  `curBld` と `curFlr` の**両方**を見ること（片方だけだと `建物名/null` を書く）。
+- MODULARIZE ビルドなのでモジュール実体はクロージャの中。テストから
+  `Module` は見えない — 状態を覗きたいときは camplanStorage のモックに
+  書かせて、そこを読む。
 
 ## 次の候補
 
+- rapidsos-proto 側で `camplanStorage` を object API の `kv_*` に繋ぐ
+  （docs/ を server_sample/*/html/camplan/ にコピーする配線と、OIDC の
+  リダイレクト先を test_object_api.html から camplan に変える）
+- Safie の実機での確認（今はモックでの検証だけ。SDK のバージョン固定も未検討）
 - 縮尺（2点クリック+実距離入力で m 表示、距離パネルを m に）
 - カメラ一覧の印刷レイアウト（番号・位置・向き・画角の表）
 - 壁スナップ（45°/グリッド）、Undo
