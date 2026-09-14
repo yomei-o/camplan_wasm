@@ -98,6 +98,11 @@ with sync_playwright() as p:
     ck(buildings(pg) == ["サンプル株式会社"], "建物リスト: %s" % buildings(pg))
     ck(floors(pg) == ["1F"], "階リスト: %s" % floors(pg))
     ck(current_floor(pg) == ["1F"], "1F が選択状態")
+    # 白紙だとカメラを置く場所が無いので、既定の階には見本の図面を入れる
+    saved = pg.evaluate("window.__kv.get('サンプル株式会社/1F')")
+    ck('"background"' in saved or '"bg"' in saved,
+       "既定の階に背景図面が入っている（%d バイト）" % len(saved))
+    ck(len(saved) > 100000, "背景の実体が入っている: %d バイト" % len(saved))
 
     print("-- 階を追加 --")
     pg.evaluate("window.prompt = () => '2F'")
@@ -114,6 +119,8 @@ with sync_playwright() as p:
     ck(sorted(buildings(pg)) == ["サンプル株式会社", "本社ビル"], "建物が増える: %s" % buildings(pg))
     ck("本社ビル/1F" in keys(pg), "建物追加で 1F が自動でできる: %s" % keys(pg))
     ck(floors(pg) == ["1F"], "新しい建物の階リストは 1F だけ: %s" % floors(pg))
+    added = pg.evaluate("window.__kv.get('本社ビル/1F')")
+    ck(len(added) < 1000, "利用者が足した建物は白紙から: %d バイト" % len(added))
 
     print("-- 自動保存 --")
     before = pg.evaluate("window.__kv.get('本社ビル/1F')")

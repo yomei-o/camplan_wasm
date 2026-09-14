@@ -266,7 +266,7 @@
 </div>
 <footer id="hint">V:選択 C:カメラ W:壁 E:消去 F:全体 Ctrl+Z:戻す Ctrl+Y:やり直し Del:削除 / 追加: クリック→ドラッグで向き / 壁: クリックで頂点、Enterで確定 / ホイール: ズーム</footer>
 
-<script src="camplan.js?v=20260914015429"></script>
+<script src="camplan.js?v=20260914021501"></script>
 <script>
 createCamplan().then(function (M) {
   'use strict';
@@ -537,7 +537,7 @@ createCamplan().then(function (M) {
   // the compressed bytes for saving, so the page never touches pixels here.
   function loadImageFile(file, name) {
     var fileName = name || file.name || 'image';
-    file.arrayBuffer().then(function (buf) {
+    return file.arrayBuffer().then(function (buf) {
       var bytes = new Uint8Array(buf);
       var fp = M._cp_alloc(bytes.length);
       M.HEAPU8.set(bytes, fp);
@@ -699,6 +699,7 @@ createCamplan().then(function (M) {
   var DEFAULT_BUILDING = 'サンプル株式会社';
   var DEFAULT_FLOOR = '1F';
   var AUTOSAVE_IDLE_MS = 1500;
+  var DEMO_IMAGE = 'cocololo.jpg';   // 既定の階に入れる見本の図面
 
   var navBox = document.getElementById('navBox');
   var bldSel = document.getElementById('bldSel');
@@ -810,9 +811,13 @@ createCamplan().then(function (M) {
   }
 
   // 空の図面の JSON。新しい階はこれで作る。
+  // "app":"camplan" が無い JSON は Document::fromJson が受け付けない
+  // （読めなかったとき書類を壊さないための作り）。これを外すと cp_load が
+  // 黙って失敗して、今開いている図面がそのまま新しい階に複製される。
+  var EMPTY_DOC = '{"app":"camplan","version":1,"walls":[],"cameras":[]}';
   function emptyJson() {
     var keep = currentJson();
-    loadJsonText('{"cameras":[],"walls":[]}');
+    if (!loadJsonText(EMPTY_DOC)) return EMPTY_DOC;   // 念のため
     var empty = currentJson();
     loadJsonText(keep);
     return empty;
@@ -827,16 +832,30 @@ createCamplan().then(function (M) {
     return s;
   }
 
-  function createFloor(b, f) {
-    var empty = emptyJson();
-    return store.save(keyOf(b, f), empty).then(function () {
-      (tree[b] = tree[b] || []).push(f);
-      tree[b].sort();
-      curBld = b; curFlr = f; syncedJson = empty;
-      loadJsonText(empty);
-      busy = false;
-      renderNav();
-      say(keyOf(b, f) + ' を作りました');
+  // 見本の図面を今の書類に読み込む。無くても（file://、オフライン、配り忘れ）
+  // 白紙で続けられるので、失敗は握りつぶす。
+  function loadDemoBackground() {
+    return fetch(DEMO_IMAGE).then(function (r) {
+      return r.ok ? r.blob() : null;
+    }).then(function (blob) {
+      return blob ? loadImageFile(blob, DEMO_IMAGE) : null;
+    }).catch(function () { });
+  }
+
+  // demo = true のときだけ見本の図面入りで作る。使うのは一番最初の
+  // サンプル株式会社/1F だけで、利用者が足す建物・階は白紙から始める。
+  function createFloor(b, f, demo) {
+    return (demo ? loadDemoBackground() : Promise.resolve()).then(function () {
+      var json = demo ? currentJson() : emptyJson();
+      return store.save(keyOf(b, f), json).then(function () {
+        (tree[b] = tree[b] || []).push(f);
+        tree[b].sort();
+        curBld = b; curFlr = f; syncedJson = json;
+        loadJsonText(json);
+        busy = false;
+        renderNav();
+        say(keyOf(b, f) + ' を作りました');
+      });
     });
   }
 
@@ -916,7 +935,10 @@ createCamplan().then(function (M) {
       buildTree(items);
       var blds = Object.keys(tree).sort();
       if (!blds.length) {
-        return createFloor(DEFAULT_BUILDING, DEFAULT_FLOOR).then(function () { say(''); });
+        // 何も無いところに作る最初の1枚。白紙だと何をする画面か分からないので
+        // 見本の図面を入れておく。
+        return createFloor(DEFAULT_BUILDING, DEFAULT_FLOOR, true)
+          .then(function () { say(''); });
       }
       busy = false;
       return selectFloor(blds[0], tree[blds[0]][0]);
@@ -999,11 +1021,11 @@ createCamplan().then(function (M) {
   // The demo plan, so the first visit has something to point cameras at.
   // A failure (file://, offline) just leaves the graph paper.
   // With storage the floor's own document is the starting point, so skip it.
-  if (!store) fetch('cocololo.jpg').then(function (r) {
+  if (!store) fetch(DEMO_IMAGE).then(function (r) {
     return r.ok ? r.blob() : null;
   }).then(function (blob) {
     if (blob && !M._cp_camera_count() && !M._cp_bg_size())
-      loadImageFile(blob, 'cocololo.jpg');
+      loadImageFile(blob, DEMO_IMAGE);
   }).catch(function () {});
   requestAnimationFrame(frame);
 });
