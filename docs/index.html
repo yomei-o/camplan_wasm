@@ -260,6 +260,24 @@
     box-shadow: 0 0 10px rgba(255,190,60,.6);
   }
   #noSel { color: var(--muted); }
+  /* センサーのパネル。プロパティはカメラと同じ並び */
+  #senKv { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
+  #senKv label { color: var(--muted); white-space: nowrap; }
+  #senKv input {
+    min-width: 0;
+    background: #061020;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 3px 5px;
+    font: inherit;
+  }
+  #senKv input:focus { outline: none; border-color: var(--cyan-dim); }
+  #senState { margin-bottom: 8px; font-size: 12px; }
+  #senState.alert { color: #ff6b81; font-weight: bold; }
+  #senAlertBtn { width: 100%; margin-bottom: 6px; }
+  #senAlertBtn.on { border-color: #ff5069; color: #ff5069; }
+  #senDelBtn { width: 100%; }
   #delBtn { width: 100%; margin-top: 8px; border-color: #5a2530; color: #ff8a9a; }
   #delBtn:hover { border-color: #ff5570; box-shadow: 0 0 10px rgba(255,80,110,.3); }
   footer {
@@ -278,6 +296,7 @@
   <button class="mode on" id="m0">選択</button>
   <button class="mode" id="m1">カメラ追加</button>
   <button class="mode" id="m2">壁</button>
+  <button class="mode" id="m4">センサー追加</button>
   <button class="mode" id="m3">消去</button>
   <span class="sep"></span>
   <button id="fit">全体表示</button>
@@ -348,7 +367,19 @@
       <div id="pKv"></div>
       <button id="delBtn">このカメラを削除</button>
     </div>
-    <div id="noSel">カメラをクリックで選択</div>
+    <div id="senBox" style="display:none">
+      <h2>SELECTED SENSOR</h2>
+      <div class="props">
+        <label>記号</label><input type="text" id="senLabel" maxlength="1"
+                                  title="図面に出る記号（A〜Z）">
+      </div>
+      <div id="senState"></div>
+      <h2>PROPERTIES</h2>
+      <div id="senKv"></div>
+      <button id="senAlertBtn">異常にする</button>
+      <button id="senDelBtn">このセンサーを削除</button>
+    </div>
+    <div id="noSel">カメラ / センサーをクリックで選択</div>
     <h2>CAMERAS</h2>
     <div id="camList"></div>
     <h2>DISPLAY</h2>
@@ -368,9 +399,9 @@
     <div id="playerMsg"></div>
   </div>
 </div>
-<footer id="hint">V:選択 C:カメラ W:壁 E:消去 F:全体 Ctrl+Z:戻す Ctrl+Y:やり直し Del:削除 / 追加: クリック→ドラッグで向き / 壁: クリックで頂点、Enterで確定 / ホイール: ズーム</footer>
+<footer id="hint">V:選択 C:カメラ S:センサー W:壁 E:消去 F:全体 Ctrl+Z:戻す Ctrl+Y:やり直し Del:削除 / 追加: クリック→ドラッグ / 壁: クリックで頂点、Enterで確定 / センサー: ダブルクリックで赤 / ホイール: ズーム</footer>
 
-<script src="camplan.js?v=20261008001450"></script>
+<script src="camplan.js?v=20261008004400"></script>
 <script>
 createCamplan().then(function (M) {
   'use strict';
@@ -464,6 +495,12 @@ createCamplan().then(function (M) {
     });
   }
 
+  function sensorProps(index) {
+    if (index < 0) return {};
+    try { return JSON.parse(M.UTF8ToString(M._cp_sensor_props(index))); }
+    catch (err) { return {}; }
+  }
+
   function refreshProps(no) {
     var rows = readProps();
     var sig = JSON.stringify([no, rows]);
@@ -477,11 +514,98 @@ createCamplan().then(function (M) {
     PROP_FIELDS.forEach(function (f) { propInputs[f.key].value = map[f.key] || ''; });
   }
 
+  /* ---- センサーのパネル ----
+
+     カメラと同じ4項目を持つ。異常の赤はボタンでも図面のダブルクリックでも
+     切り替えられる（現場では図面を直接触るほうが早い）。             */
+
+  var senBox = document.getElementById('senBox');
+  var senKv = document.getElementById('senKv');
+  var senState = document.getElementById('senState');
+  var senAlertBtn = document.getElementById('senAlertBtn');
+  var senLabel = document.getElementById('senLabel');
+  var senInputs = null;
+  var senShown = null;
+
+  senLabel.onchange = function () {
+    var v = (senLabel.value || '').trim().toUpperCase();
+    var ok = v.length === 1 && M._cp_sel_sensor_set_label(v.charCodeAt(0));
+    if (!ok) alert('記号は A〜Z のうち、まだ使っていない1文字にしてください');
+    senShown = null;
+    panelStale = true;
+    touch();
+  };
+
+  function buildSensorRows() {
+    senInputs = {};
+    senKv.innerHTML = '';
+    PROP_FIELDS.forEach(function (f) {
+      var lab = document.createElement('label');
+      lab.textContent = f.label;
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.title = f.label;
+      inp.onchange = function () {
+        withStrings(M._cp_sel_sensor_set_prop, [f.key, inp.value]);
+        senShown = null;
+        panelStale = true;
+        touch();     // 絵が変わらない編集なので cp_dirty では拾えない
+      };
+      senKv.appendChild(lab);
+      senKv.appendChild(inp);
+      senInputs[f.key] = inp;
+    });
+  }
+
+  function readSensorProps() {
+    var rows = [];
+    var n = M._cp_sel_sensor_prop_count();
+    for (var i = 0; i < n; i++) {
+      rows.push([M.UTF8ToString(M._cp_sel_sensor_prop_key(i)),
+                 M.UTF8ToString(M._cp_sel_sensor_prop_value(i))]);
+    }
+    return rows;
+  }
+
+  function refreshSensor(index) {
+    var rows = readSensorProps();
+    var alert = !!M._cp_sensor_alert(index);
+    var letter = String.fromCharCode(M._cp_sensor_label(index) || 63);
+    var sig = JSON.stringify([index, rows, alert, letter]);
+    if (sig === senShown) return;
+    if (senKv.contains(document.activeElement)) return;
+    senShown = sig;
+    if (!senInputs) buildSensorRows();
+    var map = {};
+    rows.forEach(function (row) { map[row[0]] = row[1]; });
+    PROP_FIELDS.forEach(function (f) { senInputs[f.key].value = map[f.key] || ''; });
+    if (document.activeElement !== senLabel) senLabel.value = letter;
+    senState.textContent = alert ? '異常（赤）' : '通常';
+    senState.className = alert ? 'alert' : '';
+    senAlertBtn.textContent = alert ? '異常を解除' : '異常にする';
+    senAlertBtn.classList.toggle('on', alert);
+  }
+
+  senAlertBtn.onclick = function () {
+    var i = M._cp_sel_sensor();
+    if (i < 0) return;
+    M._cp_sensor_toggle(i);
+    senShown = null;
+    panelStale = true;
+  };
+  document.getElementById('senDelBtn').onclick = function () {
+    M._cp_delete_sensor();
+    panelStale = true;
+  };
+
   function refreshPanel() {
     showGeo();
     var no = M._cp_sel_number();
+    var sen = M._cp_sel_sensor();
     selBox.style.display = no ? '' : 'none';
-    noSel.style.display = no ? 'none' : '';
+    senBox.style.display = (!no && sen >= 0) ? '' : 'none';
+    noSel.style.display = (no || sen >= 0) ? 'none' : '';
+    if (!no && sen >= 0) refreshSensor(sen);
     if (no) {
       if (document.activeElement !== pNo) pNo.value = no;
       if (document.activeElement !== pDir)
@@ -538,7 +662,7 @@ createCamplan().then(function (M) {
   };
 
   /* ------------------------------------------------------------- modes */
-  var modeButtons = [0, 1, 2, 3].map(function (i) {
+  var modeButtons = [0, 1, 2, 3, 4].map(function (i) {
     var b = document.getElementById('m' + i);
     b.onclick = function () { setMode(i); };
     return b;
@@ -598,7 +722,25 @@ createCamplan().then(function (M) {
   canvas.addEventListener('dblclick', function (e) {
     var p = pos(e);
     var no = M._cp_camera_at(p[0], p[1]);
-    if (!no) return;
+    if (!no) {
+      // カメラが無ければセンサー。異常の赤を切り替えて、同じ階を見ている
+      // 人にも「ここだ」と伝わるようにする（状態は保存される）。
+      var si = M._cp_sensor_at(p[0], p[1]);
+      if (si >= 0) {
+        M._cp_select_sensor(si);
+        M._cp_sensor_toggle(si);
+        senShown = null;
+        panelStale = true;
+        touch();
+        var on = !!M._cp_sensor_alert(si);
+        var sp = sensorProps(si);
+        window.dispatchEvent(new CustomEvent('camplan:sensor',
+            { detail: { index: si, alert: on, props: sp } }));
+        if (window.onSensorToggle) window.onSensorToggle(si, on, sp);
+        e.preventDefault();
+      }
+      return;
+    }
     var props = cameraProps(no);
     window.dispatchEvent(new CustomEvent('camplan:camera',
         { detail: { number: no, props: props } }));
@@ -625,7 +767,8 @@ createCamplan().then(function (M) {
       e.preventDefault();
       return;
     }
-    var modes = { v: 0, '1': 0, c: 1, '2': 1, w: 2, '3': 2, e: 3, '4': 3 };
+    var modes = { v: 0, '1': 0, c: 1, '2': 1, s: 4, '3': 4,
+                  w: 2, '4': 2, e: 3, '5': 3 };
     var k = e.key.toLowerCase();
     if (k in modes) { setMode(modes[k]); return; }
     if (k === 'f') { M._cp_zoom_fit(); return; }

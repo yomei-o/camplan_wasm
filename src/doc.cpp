@@ -19,13 +19,13 @@ std::string plainText(const std::string & s) {
     return out;
 }
 
-int Camera::findProp(const std::string & key) const {
+int PropBag::findProp(const std::string & key) const {
     for (size_t i = 0; i < props.size(); i++)
         if (props[i].key == key) return (int)i;
     return -1;
 }
 
-bool Camera::setProp(const std::string & key, const std::string & value) {
+bool PropBag::setProp(const std::string & key, const std::string & value) {
     const std::string k = plainText(key);
     if (k.empty()) return false;
     const int at = findProp(k);
@@ -34,7 +34,7 @@ bool Camera::setProp(const std::string & key, const std::string & value) {
     return true;
 }
 
-bool Camera::renameProp(const std::string & from, const std::string & to) {
+bool PropBag::renameProp(const std::string & from, const std::string & to) {
     const std::string k = plainText(to);
     const int at = findProp(from);
     if (at < 0 || k.empty()) return false;
@@ -44,11 +44,32 @@ bool Camera::renameProp(const std::string & from, const std::string & to) {
     return true;
 }
 
-bool Camera::removeProp(const std::string & key) {
+bool PropBag::removeProp(const std::string & key) {
     const int at = findProp(key);
     if (at < 0) return false;
     props.erase(props.begin() + at);
     return true;
+}
+
+int Document::findSensor(char label) const {
+    for (size_t i = 0; i < sensors.size(); i++)
+        if (sensors[i].label == label) return (int)i;
+    return -1;
+}
+
+char Document::nextLabel() const {
+    for (char c = 'A'; c <= 'Z'; c++)
+        if (findSensor(c) < 0) return c;
+    return 0;
+}
+
+void Sensor::normalize() {
+    if (x0 > x1) std::swap(x0, x1);
+    if (y0 > y1) std::swap(y0, y1);
+}
+
+bool Sensor::contains(float wx, float wy) const {
+    return wx >= x0 && wx <= x1 && wy >= y0 && wy <= y1;
 }
 
 bool Document::setBackgroundFile(const uint8_t * data, size_t size,
@@ -94,6 +115,10 @@ void Document::contentBounds(float & x0, float & y0, float & x1,
             grow(wall.xy[i], wall.xy[i + 1], 8);
     for (const Camera & camera : cameras)
         grow(camera.x, camera.y, camera.range + 40);
+    for (const Sensor & s : sensors) {
+        grow(s.x0, s.y0, 8);
+        grow(s.x1, s.y1, 8);
+    }
     if (!any) {
         x0 = y0 = 0;
         x1 = 800;
@@ -224,6 +249,16 @@ struct Parser {
         p = next;
         return true;
     }
+    // Matches a bare word like true or false and steps over it.
+    bool eatWord(const char * word) {
+        ws();
+        const char * q = p;
+        const char * w = word;
+        while (*w && q < end && *q == *w) { q++; w++; }
+        if (*w) return false;
+        p = q;
+        return true;
+    }
     bool string(std::string & out) {
         if (!eat('"')) return false;
         out.clear();
@@ -261,7 +296,7 @@ struct Parser {
 
 }   // namespace
 
-std::string Camera::propsJson() const {
+std::string PropBag::propsJson() const {
     std::string out = "{";
     for (size_t i = 0; i < props.size(); i++) {
         if (i) out.push_back(',');
@@ -324,7 +359,37 @@ std::string Document::toJson() const {
         }
         out.push_back('}');
     }
-    out += "]}";
+    out += "]";
+    // Only written when there are any, so a plan with no sensors keeps the
+    // file it had before sensors existed.
+    if (!sensors.empty()) {
+        out += ",\"sensors\":[";
+        for (size_t i = 0; i < sensors.size(); i++) {
+            const Sensor & s = sensors[i];
+            out += i ? ",{" : "{";
+            out += "\"x0\":";
+            appendNumber(out, s.x0);
+            out += ",\"y0\":";
+            appendNumber(out, s.y0);
+            out += ",\"x1\":";
+            appendNumber(out, s.x1);
+            out += ",\"y1\":";
+            appendNumber(out, s.y1);
+            if (s.label) {
+                out += ",\"label\":\"";
+                out.push_back(s.label);
+                out += "\"";
+            }
+            if (s.alert) out += ",\"alert\":true";
+            if (!s.props.empty()) {
+                out += ",\"props\":";
+                out += s.propsJson();
+            }
+            out.push_back('}');
+        }
+        out.push_back(']');
+    }
+    out.push_back('}');
     return out;
 }
 
@@ -370,6 +435,63 @@ bool Document::fromJson(const std::string & text) {
             // cameras and walls still load, on graph paper.
             const std::vector<uint8_t> file = base64Decode(data);
             loaded.setBackgroundFile(file.data(), file.size(), name);
+        } else if (key == "sensors") {
+            if (!in.eat('[')) return false;
+            if (!in.eat(']')) {
+                do {
+                    if (!in.eat('{')) return false;
+                    Sensor s;
+                    for (;;) {
+                        std::string k;
+                        if (!in.string(k)) break;
+                        if (!in.eat(':')) return false;
+                        float v = 0;
+                        if (k == "props") {
+                            if (!in.eat('{')) return false;
+                            if (!in.eat('}')) {
+                                do {
+                                    std::string pk, pv;
+                                    if (!in.string(pk) || !in.eat(':') ||
+                                        !in.string(pv))
+                                        return false;
+                                    s.setProp(pk, pv);
+                                } while (in.eat(','));
+                                if (!in.eat('}')) return false;
+                            }
+                        }
+                        else if (k == "alert") {
+                            // true / false, or anything else we skip over
+                            if (in.eatWord("true")) s.alert = true;
+                            else if (in.eatWord("false")) s.alert = false;
+                            else if (!in.skipValue()) return false;
+                        }
+                        else if (k == "label") {
+                            std::string lv;
+                            if (!in.string(lv)) return false;
+                            // A..Z only; anything else gets a letter on load
+                            if (lv.size() == 1 && lv[0] >= 'A' && lv[0] <= 'Z')
+                                s.label = lv[0];
+                            else
+                                s.label = 0;
+                        }
+                        else if (k == "x0" && in.number(v)) s.x0 = v;
+                        else if (k == "y0" && in.number(v)) s.y0 = v;
+                        else if (k == "x1" && in.number(v)) s.x1 = v;
+                        else if (k == "y1" && in.number(v)) s.y1 = v;
+                        else if (k != "x0" && k != "y0" && k != "x1" &&
+                                 k != "y1" && !in.skipValue())
+                            return false;
+                        if (!in.eat(',')) break;
+                    }
+                    if (!in.eat('}')) return false;
+                    s.normalize();
+                    // 記号が無い（古いファイル）か、既に使われていたら振り直す
+                    if (!s.label || loaded.findSensor(s.label) >= 0)
+                        s.label = loaded.nextLabel();
+                    loaded.sensors.push_back(s);
+                } while (in.eat(','));
+                if (!in.eat(']')) return false;
+            }
         } else if (key == "walls") {
             if (!in.eat('[')) return false;
             if (!in.eat(']')) {

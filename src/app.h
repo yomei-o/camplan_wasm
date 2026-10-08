@@ -7,7 +7,8 @@
 
 namespace cam {
 
-enum class Mode { select = 0, addCamera = 1, wall = 2, erase = 3 };
+enum class Mode { select = 0, addCamera = 1, wall = 2, erase = 3,
+                 addSensor = 4 };
 
 class App {
 public:
@@ -32,6 +33,16 @@ public:
     Camera * selectedCamera();
     bool setSelectedNumber(int number);   // false when taken or out of 1..99
     void deleteSelected();
+
+    // Sensors.  A camera and a sensor are never both selected.
+    int selectedSensorIndex() const { return selSensor_; }
+    Sensor * selectedSensor();
+    void selectSensor(int index);
+    // The sensor under a screen point, or -1.  The page asks on a double
+    // click, where a camera takes priority (it opens the video).
+    int sensorAtScreen(float sx, float sy) const;
+    // Flips the red state of that sensor.  false when there is none there.
+    bool toggleSensorAlert(int index);
 
     // Places the whole document in view.
     void zoomToFit();
@@ -59,13 +70,17 @@ public:
 
 private:
     enum class Drag {
-        none, pan, maybePan, moveCamera, aimHandle, fovHandleA, fovHandleB
+        none, pan, maybePan, moveCamera, aimHandle, fovHandleA, fovHandleB,
+        newSensor, moveSensor, sensorCorner
     };
 
     Canvas screen_;
     Canvas export_;
     Mode mode_ = Mode::select;
     int selected_ = -1;
+    int selSensor_ = -1;
+    int sensorCorner_ = -1;               // 0 TL, 1 TR, 2 BR, 3 BL
+    float sensorAnchorX_ = 0, sensorAnchorY_ = 0;   // world, the fixed corner
     Drag drag_ = Drag::none;
     float scale_ = 1.f;
     float ox_ = 0.f, oy_ = 0.f;           // world -> screen offset
@@ -76,6 +91,7 @@ private:
     struct Snapshot {
         std::vector<Camera> cameras;
         std::vector<Wall> walls;
+        std::vector<Sensor> sensors;
         float markerSize;
     };
     std::vector<Snapshot> undo_;
@@ -88,6 +104,9 @@ private:
     float worldY(float sy) const { return (sy - oy_) / scale_; }
 
     int hitCamera(float wx, float wy) const;
+    int hitSensor(float wx, float wy) const;
+    // Which corner handle of the selected sensor is under the point, or -1.
+    int hitSensorCorner(float sx, float sy) const;
     void finishWall();
     void eraseAt(float wx, float wy);
     void drawScene(Canvas & out, float scale, float ox, float oy,

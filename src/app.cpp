@@ -38,6 +38,8 @@ struct Theme {
     uint32_t handleFill, handleRing;
     uint32_t pendingWall;
     uint32_t imageDim;      // painted over a background image; 0 = none
+    uint32_t senFill, senEdge;                   // a quiet sensor
+    uint32_t senAlertFill, senAlertEdge;         // one somebody flagged
 };
 
 const Theme kDark = {
@@ -50,6 +52,8 @@ const Theme kDark = {
     rgba(255, 190, 60), rgba(20, 30, 40),
     rgba(255, 190, 60, 200),
     rgba(4, 10, 20, 96),
+    rgba(0, 255, 180, 30), rgba(0, 255, 190, 150),
+    rgba(255, 40, 70, 70), rgba(255, 70, 90, 235),
 };
 
 const Theme kLight = {
@@ -62,6 +66,8 @@ const Theme kLight = {
     rgba(240, 100, 0), rgba(255, 255, 255),
     rgba(240, 100, 0, 200),
     0,
+    rgba(0, 170, 130, 36), rgba(0, 150, 120, 170),
+    rgba(230, 0, 40, 46), rgba(220, 20, 50, 235),
 };
 
 int g_theme = 0;    // 0 dark, 1 light
@@ -103,11 +109,63 @@ bool App::setSelectedNumber(int number) {
 }
 
 void App::deleteSelected() {
+    // センサーが選ばれていればそちらを消す（Del キーは共通）
+    if (selSensor_ >= 0 && selSensor_ < (int)doc.sensors.size()) {
+        pushHistory();
+        doc.sensors.erase(doc.sensors.begin() + selSensor_);
+        selSensor_ = -1;
+        dirty_ = true;
+        return;
+    }
     if (selected_ < 0 || selected_ >= (int)doc.cameras.size()) return;
     pushHistory();
     doc.cameras.erase(doc.cameras.begin() + selected_);
     selected_ = -1;
     dirty_ = true;
+}
+
+Sensor * App::selectedSensor() {
+    if (selSensor_ < 0 || selSensor_ >= (int)doc.sensors.size()) return nullptr;
+    return &doc.sensors[selSensor_];
+}
+
+void App::selectSensor(int index) {
+    selSensor_ = (index >= 0 && index < (int)doc.sensors.size()) ? index : -1;
+    if (selSensor_ >= 0) selected_ = -1;     // 片方だけが選ばれている
+    dirty_ = true;
+}
+
+// 後ろに置いたものほど手前。重なっていたら上のものを拾う。
+int App::hitSensor(float wx, float wy) const {
+    for (int i = (int)doc.sensors.size() - 1; i >= 0; i--)
+        if (doc.sensors[i].contains(wx, wy)) return i;
+    return -1;
+}
+
+int App::hitSensorCorner(float sx, float sy) const {
+    if (selSensor_ < 0 || selSensor_ >= (int)doc.sensors.size()) return -1;
+    const Sensor & s = doc.sensors[selSensor_];
+    const float cx[4] = {s.x0, s.x1, s.x1, s.x0};
+    const float cy[4] = {s.y0, s.y0, s.y1, s.y1};
+    const float grab = kHandleRadius + 5.f;
+    for (int i = 0; i < 4; i++) {
+        const float dx = sx - (cx[i] * scale_ + ox_);
+        const float dy = sy - (cy[i] * scale_ + oy_);
+        if (dx * dx + dy * dy <= grab * grab) return i;
+    }
+    return -1;
+}
+
+int App::sensorAtScreen(float sx, float sy) const {
+    return hitSensor(worldX(sx), worldY(sy));
+}
+
+bool App::toggleSensorAlert(int index) {
+    if (index < 0 || index >= (int)doc.sensors.size()) return false;
+    pushHistory();
+    doc.sensors[index].alert = !doc.sensors[index].alert;
+    dirty_ = true;
+    return true;
 }
 
 void App::setMode(Mode m) {
@@ -124,15 +182,16 @@ int App::cameraNumberAtScreen(float sx, float sy) const {
 void App::pushHistory(const char * tag) {
     if (tag && *tag && historyTag_ == tag) return;   // one step per slider
     historyTag_ = tag ? tag : "";
-    undo_.push_back({doc.cameras, doc.walls, doc.markerSize});
+    undo_.push_back({doc.cameras, doc.walls, doc.sensors, doc.markerSize});
     if (undo_.size() > 100) undo_.erase(undo_.begin());
     redo_.clear();
 }
 
 void App::undo() {
     if (undo_.empty()) return;
-    redo_.push_back({doc.cameras, doc.walls, doc.markerSize});
+    redo_.push_back({doc.cameras, doc.walls, doc.sensors, doc.markerSize});
     const Snapshot & s = undo_.back();
+    doc.sensors = s.sensors;
     doc.cameras = s.cameras;
     doc.walls = s.walls;
     doc.markerSize = s.markerSize;
@@ -144,8 +203,9 @@ void App::undo() {
 
 void App::redo() {
     if (redo_.empty()) return;
-    undo_.push_back({doc.cameras, doc.walls, doc.markerSize});
+    undo_.push_back({doc.cameras, doc.walls, doc.sensors, doc.markerSize});
     const Snapshot & s = redo_.back();
+    doc.sensors = s.sensors;
     doc.cameras = s.cameras;
     doc.walls = s.walls;
     doc.markerSize = s.markerSize;
@@ -212,16 +272,41 @@ void App::mouseDown(float x, float y, int button) {
             if (near(eax, eay)) { pushHistory(); drag_ = Drag::fovHandleA; return; }
             if (near(ebx, eby)) { pushHistory(); drag_ = Drag::fovHandleB; return; }
         }
+        // 選択中のセンサーの角 - カメラのハンドルと同じく最前面
+        const int corner = hitSensorCorner(x, y);
+        if (corner >= 0) {
+            Sensor * s = selectedSensor();
+            pushHistory();
+            // 掴んだ角の対角は動かさない
+            sensorAnchorX_ = (corner == 0 || corner == 3) ? s->x1 : s->x0;
+            sensorAnchorY_ = (corner == 0 || corner == 1) ? s->y1 : s->y0;
+            sensorCorner_ = corner;
+            drag_ = Drag::sensorCorner;
+            return;
+        }
         const int hit = hitCamera(wx, wy);
         if (hit >= 0) {
             pushHistory();
             selected_ = hit;
+            selSensor_ = -1;
             drag_ = Drag::moveCamera;
             grabDX_ = doc.cameras[hit].x - wx;
             grabDY_ = doc.cameras[hit].y - wy;
             dirty_ = true;
             return;
         }
+        const int sh = hitSensor(wx, wy);
+        if (sh >= 0) {
+            pushHistory();
+            selSensor_ = sh;
+            selected_ = -1;
+            drag_ = Drag::moveSensor;
+            grabDX_ = doc.sensors[sh].x0 - wx;
+            grabDY_ = doc.sensors[sh].y0 - wy;
+            dirty_ = true;
+            return;
+        }
+        selSensor_ = -1;
         drag_ = Drag::maybePan;
         return;
     }
@@ -249,6 +334,25 @@ void App::mouseDown(float x, float y, int button) {
     case Mode::erase:
         eraseAt(wx, wy);
         return;
+    case Mode::addSensor: {
+        // カメラと同じ流儀で、置いてそのままドラッグして大きさを決める
+        pushHistory();
+        const char label = doc.nextLabel();
+        if (!label) return;         // A から Z まで埋まっている
+        Sensor s;
+        s.label = label;
+        s.x0 = s.x1 = wx;
+        s.y0 = s.y1 = wy;
+        doc.sensors.push_back(s);
+        selSensor_ = (int)doc.sensors.size() - 1;
+        selected_ = -1;
+        sensorAnchorX_ = wx;
+        sensorAnchorY_ = wy;
+        sensorCorner_ = 2;
+        drag_ = Drag::newSensor;
+        dirty_ = true;
+        return;
+    }
     }
 }
 
@@ -269,6 +373,26 @@ void App::mouseMove(float x, float y) {
         if (drag_ == Drag::pan) {
             ox_ += x - lastX_;
             oy_ += y - lastY_;
+            dirty_ = true;
+        }
+        break;
+    case Drag::newSensor:
+    case Drag::sensorCorner:
+        if (Sensor * s = selectedSensor()) {
+            s->x0 = std::min(sensorAnchorX_, wx);
+            s->x1 = std::max(sensorAnchorX_, wx);
+            s->y0 = std::min(sensorAnchorY_, wy);
+            s->y1 = std::max(sensorAnchorY_, wy);
+            dirty_ = true;
+        }
+        break;
+    case Drag::moveSensor:
+        if (Sensor * s = selectedSensor()) {
+            const float w = s->w(), h = s->h();
+            s->x0 = wx + grabDX_;
+            s->y0 = wy + grabDY_;
+            s->x1 = s->x0 + w;
+            s->y1 = s->y0 + h;
             dirty_ = true;
         }
         break;
@@ -368,6 +492,15 @@ void App::finishWall() {
 }
 
 void App::eraseAt(float wx, float wy) {
+    const int sh = hitSensor(wx, wy);
+    if (sh >= 0) {
+        pushHistory();
+        doc.sensors.erase(doc.sensors.begin() + sh);
+        if (selSensor_ == sh) selSensor_ = -1;
+        else if (selSensor_ > sh) selSensor_--;
+        dirty_ = true;
+        return;
+    }
     const int hit = hitCamera(wx, wy);
     if (hit >= 0) {
         pushHistory();
@@ -483,6 +616,44 @@ void App::drawScene(Canvas & out, float scale, float ox, float oy,
         }
         out.polyline(pts, kWallWidth * scale * 2.6f, t.wallGlow);
         out.polyline(pts, kWallWidth * scale, t.wallCore);
+    }
+
+    // Sensors go under the cameras: a camera sitting in a sensor's area has
+    // to stay readable.
+    for (size_t i = 0; i < doc.sensors.size(); i++) {
+        const Sensor & s = doc.sensors[i];
+        const float x0 = s.x0 * scale + ox, y0 = s.y0 * scale + oy;
+        const float x1 = s.x1 * scale + ox, y1 = s.y1 * scale + oy;
+        const uint32_t fill = s.alert ? t.senAlertFill : t.senFill;
+        const uint32_t edge = s.alert ? t.senAlertEdge : t.senEdge;
+        out.fillRect(x0, y0, x1, y1, fill);
+        const float lw = std::max(1.5f, 2.f * scale * 0.5f);
+        out.line(x0, y0, x1, y0, lw, edge);
+        out.line(x1, y0, x1, y1, lw, edge);
+        out.line(x1, y1, x0, y1, lw, edge);
+        out.line(x0, y1, x0, y0, lw, edge);
+        // The letter, in a disc at the top-left corner, the way a camera wears
+        // its number.  Only the letter: the name is Japanese and the baked
+        // font has none of it.
+        if (s.label) {
+            const float cr = std::max(doc.markerSize * scale * 0.72f, 8.f);
+            const float bx = x0 + cr + 2.f, by = y0 + cr + 2.f;
+            out.fillCircle(bx, by, cr, t.camFill);
+            out.circle(bx, by, cr, 2.f, edge);
+            const char text[2] = {s.label, 0};
+            const int textPx = (int)std::max(cr * 1.05f, 8.f);
+            const float tw = out.textWidth(text, textPx);
+            out.text(bx - tw * 0.5f, by - textPx * 0.62f, text, textPx,
+                     t.camText);
+        }
+        if (withUi && (int)i == selSensor_) {
+            const float cx[4] = {x0, x1, x1, x0};
+            const float cy[4] = {y0, y0, y1, y1};
+            for (int k = 0; k < 4; k++) {
+                out.fillCircle(cx[k], cy[k], kHandleRadius - 1.5f, t.handleFill);
+                out.circle(cx[k], cy[k], kHandleRadius - 1.5f, 2.f, t.handleRing);
+            }
+        }
     }
 
     for (size_t i = 0; i < doc.cameras.size(); i++)

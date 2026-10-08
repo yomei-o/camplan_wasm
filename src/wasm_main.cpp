@@ -195,6 +195,86 @@ EMSCRIPTEN_KEEPALIVE int cp_sel_remove_prop(const char * key) {
     return c->removeProp(key) ? 1 : 0;
 }
 
+/* ---- Sensors -------------------------------------------------------------
+
+   A rectangle with the same four properties a camera has.  There is no sensor
+   API yet, so `alert` is turned on by hand (double click) to show everyone
+   looking at this floor where the trouble is.                               */
+
+EMSCRIPTEN_KEEPALIVE int cp_sensor_count(void) {
+    return (int)g_app.doc.sensors.size();
+}
+EMSCRIPTEN_KEEPALIVE int cp_sel_sensor(void) {
+    return g_app.selectedSensorIndex();
+}
+EMSCRIPTEN_KEEPALIVE void cp_select_sensor(int index) {
+    g_app.selectSensor(index);
+}
+// The sensor under a screen point, or -1.
+EMSCRIPTEN_KEEPALIVE int cp_sensor_at(float x, float y) {
+    return g_app.sensorAtScreen(x, y);
+}
+// The letter this area goes by, as a character code.  0 when there is none.
+EMSCRIPTEN_KEEPALIVE int cp_sensor_label(int index) {
+    const cam::Document & doc = g_app.doc;
+    if (index < 0 || index >= (int)doc.sensors.size()) return 0;
+    return (unsigned char)doc.sensors[(size_t)index].label;
+}
+// 0 when the letter is outside A..Z or another area already uses it.
+EMSCRIPTEN_KEEPALIVE int cp_sel_sensor_set_label(int code) {
+    cam::Sensor * s = g_app.selectedSensor();
+    if (!s || code < 'A' || code > 'Z') return 0;
+    const int other = g_app.doc.findSensor((char)code);
+    if (other >= 0 && other != g_app.selectedSensorIndex()) return 0;
+    g_app.pushHistory();
+    s->label = (char)code;
+    g_app.markDirty();
+    return 1;
+}
+EMSCRIPTEN_KEEPALIVE int cp_sensor_alert(int index) {
+    const cam::Document & doc = g_app.doc;
+    if (index < 0 || index >= (int)doc.sensors.size()) return 0;
+    return doc.sensors[(size_t)index].alert ? 1 : 0;
+}
+EMSCRIPTEN_KEEPALIVE int cp_sensor_toggle(int index) {
+    return g_app.toggleSensorAlert(index) ? 1 : 0;
+}
+EMSCRIPTEN_KEEPALIVE void cp_delete_sensor(void) {
+    if (g_app.selectedSensorIndex() >= 0) g_app.deleteSelected();
+}
+
+// The selected sensor's properties, the same shape the camera panel uses.
+EMSCRIPTEN_KEEPALIVE int cp_sel_sensor_prop_count(void) {
+    const cam::Sensor * s = g_app.selectedSensor();
+    return s ? (int)s->props.size() : 0;
+}
+EMSCRIPTEN_KEEPALIVE const char * cp_sel_sensor_prop_key(int i) {
+    const cam::Sensor * s = g_app.selectedSensor();
+    if (!s || i < 0 || i >= (int)s->props.size()) return "";
+    return s->props[(size_t)i].key.c_str();
+}
+EMSCRIPTEN_KEEPALIVE const char * cp_sel_sensor_prop_value(int i) {
+    const cam::Sensor * s = g_app.selectedSensor();
+    if (!s || i < 0 || i >= (int)s->props.size()) return "";
+    return s->props[(size_t)i].value.c_str();
+}
+EMSCRIPTEN_KEEPALIVE int cp_sel_sensor_set_prop(const char * key,
+                                                const char * value) {
+    cam::Sensor * s = g_app.selectedSensor();
+    if (!s || !key || cam::plainText(key).empty()) return 0;
+    g_app.pushHistory();
+    return s->setProp(key, value ? value : "") ? 1 : 0;
+}
+
+// Every property of one sensor as a JSON object, for the page.
+EMSCRIPTEN_KEEPALIVE const char * cp_sensor_props(int index) {
+    static std::string out;
+    const cam::Document & doc = g_app.doc;
+    if (index < 0 || index >= (int)doc.sensors.size()) { out = "{}"; return out.c_str(); }
+    out = doc.sensors[(size_t)index].propsJson();
+    return out.c_str();
+}
+
 // Every property of one camera as a JSON object, for the page's click hook.
 // An unknown number gives {}.
 EMSCRIPTEN_KEEPALIVE const char * cp_camera_props(int number) {

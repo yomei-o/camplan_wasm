@@ -19,12 +19,9 @@ struct Prop {
     bool operator==(const Prop & other) const = default;
 };
 
-struct Camera {
-    int number = 1;          // 1..99
-    float x = 0, y = 0;      // world position
-    float dirDeg = 0;        // view direction, degrees, 0 = +x, CCW positive
-    float fovDeg = 90;       // full opening angle
-    float range = 200;       // world pixels
+// Everything the page can label carries the same bag of strings, so the
+// panel and the JSON treat a camera and a sensor alike.
+struct PropBag {
     std::vector<Prop> props;   // in the order they were first set
 
     int findProp(const std::string & key) const;   // -1 when there is none
@@ -36,6 +33,32 @@ struct Camera {
     bool removeProp(const std::string & key);
     // {"key":"value",...} - what the page receives on a click.
     std::string propsJson() const;
+};
+
+struct Camera : PropBag {
+    int number = 1;          // 1..99
+    float x = 0, y = 0;      // world position
+    float dirDeg = 0;        // view direction, degrees, 0 = +x, CCW positive
+    float fovDeg = 90;       // full opening angle
+    float range = 200;       // world pixels
+};
+
+// A rectangle on the plan with a sensor in it.  There is no sensor API yet,
+// so `alert` is set by hand: double click to turn the area red and tell
+// everyone looking at this floor where the trouble is, double click again to
+// clear it.  It is saved, or the next person to open the plan would not see it.
+struct Sensor : PropBag {
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;   // world, normalised so x0<x1, y0<y1
+    bool alert = false;
+    // What the plan calls this area: 'A'..'Z'.  A camera is called by its
+    // number; a sensor by a letter.  The name is Japanese and the baked font
+    // (DejaVu Sans) has no Japanese, so the drawing can only carry the letter.
+    char label = 'A';
+
+    void normalize();                        // swaps the corners if needed
+    bool contains(float wx, float wy) const;
+    float w() const { return x1 - x0; }
+    float h() const { return y1 - y0; }
 };
 
 struct Wall {
@@ -53,6 +76,7 @@ struct Document {
     std::optional<Background> background;
     std::vector<Wall> walls;
     std::vector<Camera> cameras;
+    std::vector<Sensor> sensors;
     float markerSize = 16;   // the numbered disc's radius, world pixels
     // Where this floor is, for whoever is on their way to it.  Either both are
     // set or neither is useful, but they are edited one field at a time, so
@@ -69,6 +93,10 @@ struct Document {
     int findCamera(int number) const;
     // The lowest free number in 1..99, or 0 when all are taken.
     int nextNumber() const;
+
+    int findSensor(char label) const;
+    // The first free letter in A..Z, or 0 when all twenty-six are taken.
+    char nextLabel() const;
 
     // The content's world bounding box (for exporting the paper mode).
     void contentBounds(float & x0, float & y0, float & x1, float & y1) const;
