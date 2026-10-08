@@ -23,6 +23,25 @@ rapidsos-proto（社内の Lambda サーバ）の `src/web/camplan_wasm` に sub
 入っている。将来そちら側で `camplanStorage` を object API の `kv_*` に繋いで、
 OIDC ログイン後のページを camplan にする予定。camplan 単体でも動くのはそのため。
 
+## 状態 (2026-10-08)
+
+視聴履歴・センサー・モーション検知の3つ。**どれも camplan 側だけで済んだ**
+（Safie の REST は CORS が無く APIキーもヘッダ必須だが、JS SDK が中継してくれる）。
+
+- **視聴履歴** — 見たカメラを左にサムネイル付きで。`Devices.queryThumbnail` は
+  Blob を返す。`Auth.setToken` は SDK 全体で1つしかないので、1件ずつ順番に取り、
+  再生中は触らない（開いた瞬間にトークンを奪うと再生が壊れる）。
+- **センサー** — 四角いエリア。`Document::sensors`。カメラとプロパティの扱いが
+  同じなので `PropBag` に切り出した。異常の赤はダブルクリックで手動、**保存する**。
+  図面に出るのは A, B, … の記号だけ（焼き込みフォントが日本語を持たない）。
+- **モーション検知** — `Devices.queryStandardEvents`。**保存しない**ので
+  `Document` ではなく `App` が持つ。色はマゼンタ（琥珀＝選択中、赤＝センサー異常
+  と被らないように）。
+
+テスト用カメラ2台（`BgxAdnxMrxYC2mORK0wK` / `mDvGCfksdIj8MoKi1Wqw`）は
+サムネイルも映像も出るが、`standard_events` は全種別で24時間ゼロ、
+`capabilities` も空配列。**モーション検知は実機で未確認**。
+
 ## 状態 (2026-09-14 その2)
 
 一時URLの発行・通報ボタン・階ごとの緯度経度を足した。**ここで初めて C++ を
