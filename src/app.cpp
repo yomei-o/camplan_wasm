@@ -40,6 +40,10 @@ struct Theme {
     uint32_t imageDim;      // painted over a background image; 0 = none
     uint32_t senFill, senEdge;                   // a quiet sensor
     uint32_t senAlertFill, senAlertEdge;         // one somebody flagged
+    // A camera that just saw motion.  Magenta on purpose: amber is already the
+    // selection and red is already a sensor somebody flagged, so neither can
+    // say "this one is moving" without being read as something else.
+    uint32_t motFanFill, motFanEdge, motRing;
 };
 
 const Theme kDark = {
@@ -54,6 +58,7 @@ const Theme kDark = {
     rgba(4, 10, 20, 96),
     rgba(0, 255, 180, 30), rgba(0, 255, 190, 150),
     rgba(255, 40, 70, 70), rgba(255, 70, 90, 235),
+    rgba(255, 60, 220, 56), rgba(255, 105, 235, 230), rgba(255, 130, 240, 245),
 };
 
 const Theme kLight = {
@@ -68,6 +73,7 @@ const Theme kLight = {
     0,
     rgba(0, 170, 130, 36), rgba(0, 150, 120, 170),
     rgba(230, 0, 40, 46), rgba(220, 20, 50, 235),
+    rgba(220, 0, 180, 52), rgba(185, 0, 150, 235), rgba(185, 0, 150, 245),
 };
 
 int g_theme = 0;    // 0 dark, 1 light
@@ -213,6 +219,24 @@ void App::redo() {
     selected_ = -1;
     historyTag_.clear();
     dirty_ = true;
+}
+
+void App::setMotion(int number, bool on) {
+    if (number < 1 || number > 99) return;
+    if (motion_[number] == on) return;
+    motion_[number] = on;
+    dirty_ = true;
+}
+
+bool App::motion(int number) const {
+    return number >= 1 && number <= 99 && motion_[number];
+}
+
+void App::clearMotion() {
+    for (int i = 0; i < 100; i++) {
+        if (motion_[i]) dirty_ = true;
+        motion_[i] = false;
+    }
 }
 
 void App::zoomToFit() {
@@ -557,7 +581,7 @@ void drawGrid(Canvas & out, float scale, float ox, float oy, const Theme & t) {
     lines(majorStep, t.gridMajor);
 }
 
-void drawCamera(Canvas & out, const Camera & c, bool isSelected,
+void drawCamera(Canvas & out, const Camera & c, bool isSelected, bool moving,
                 float markerSize, float scale, float ox, float oy,
                 const Theme & t) {
     const float sx = c.x * scale + ox;
@@ -567,8 +591,11 @@ void drawCamera(Canvas & out, const Camera & c, bool isSelected,
     const float a1 = deg2rad(c.dirDeg + c.fovDeg * 0.5f);
     const float mid = deg2rad(c.dirDeg);
 
-    out.fillPie(sx, sy, r, a0, a1, isSelected ? t.selFanFill : t.fanFill);
-    const uint32_t edgeColor = isSelected ? t.selFanEdge : t.fanEdge;
+    // Motion wins over the selection colour: it is the thing to look at.
+    out.fillPie(sx, sy, r, a0, a1,
+                moving ? t.motFanFill : (isSelected ? t.selFanFill : t.fanFill));
+    const uint32_t edgeColor =
+        moving ? t.motFanEdge : (isSelected ? t.selFanEdge : t.fanEdge);
     out.arc(sx, sy, r, a0, a1, 1.6f, edgeColor);
     out.line(sx, sy, sx + std::cos(a0) * r, sy + std::sin(a0) * r, 1.2f,
              edgeColor);
@@ -582,9 +609,11 @@ void drawCamera(Canvas & out, const Camera & c, bool isSelected,
 
     // The numbered disc, with a soft glow ring when selected.
     const float cr = markerSize * std::max(scale, 0.45f);
-    if (isSelected) out.circle(sx, sy, cr + 3.f, 6.f, t.selFanFill);
+    if (moving) out.circle(sx, sy, cr + 3.f, 6.f, t.motFanFill);
+    else if (isSelected) out.circle(sx, sy, cr + 3.f, 6.f, t.selFanFill);
     out.fillCircle(sx, sy, cr, t.camFill);
-    out.circle(sx, sy, cr, 2.2f, isSelected ? t.selRing : t.camRing);
+    out.circle(sx, sy, cr, 2.2f,
+               moving ? t.motRing : (isSelected ? t.selRing : t.camRing));
     char label[8];
     std::snprintf(label, sizeof label, "%d", c.number);
     const int textPx = (int)std::max(cr * 1.05f, 8.f);
@@ -658,6 +687,7 @@ void App::drawScene(Canvas & out, float scale, float ox, float oy,
 
     for (size_t i = 0; i < doc.cameras.size(); i++)
         drawCamera(out, doc.cameras[i], withUi && (int)i == selected_,
+                   motion(doc.cameras[i].number),
                    doc.markerSize, scale, ox, oy, t);
 
     if (!withUi) return;

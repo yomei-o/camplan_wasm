@@ -195,6 +195,19 @@ EMSCRIPTEN_KEEPALIVE int cp_sel_remove_prop(const char * key) {
     return c->removeProp(key) ? 1 : 0;
 }
 
+/* ---- Motion ---------------------------------------------------------------
+
+   Which cameras have just seen something move.  The page asks the camera
+   service and tells us; we only colour them.  Never saved, never in undo.  */
+
+EMSCRIPTEN_KEEPALIVE void cp_set_motion(int number, int on) {
+    g_app.setMotion(number, on != 0);
+}
+EMSCRIPTEN_KEEPALIVE int cp_motion(int number) {
+    return g_app.motion(number) ? 1 : 0;
+}
+EMSCRIPTEN_KEEPALIVE void cp_clear_motion(void) { g_app.clearMotion(); }
+
 /* ---- Sensors -------------------------------------------------------------
 
    A rectangle with the same four properties a camera has.  There is no sensor

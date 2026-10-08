@@ -44,6 +44,13 @@ public:
     // Flips the red state of that sensor.  false when there is none there.
     bool toggleSensorAlert(int index);
 
+    // Which cameras have just seen something move.  This comes from the
+    // camera service and ages out, so it is not part of the document: it is
+    // never saved and undo does not touch it.  Numbers are 1..99.
+    void setMotion(int number, bool on);
+    bool motion(int number) const;
+    void clearMotion();
+
     // Places the whole document in view.
     void zoomToFit();
 
@@ -98,6 +105,7 @@ private:
     std::vector<Snapshot> redo_;
     std::string historyTag_;
     float hoverX_ = 0.f, hoverY_ = 0.f;   // world, for the wall preview
+    bool motion_[100] = {};               // indexed by camera number, 1..99
     bool dirty_ = true;
 
     float worldX(float sx) const { return (sx - ox_) / scale_; }

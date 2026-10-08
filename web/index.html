@@ -898,7 +898,7 @@ createCamplan().then(function (M) {
     playerWrap.style.display = 'none';
     playerMsg.textContent = '';
     playerMsg.className = '';
-    refreshThumbs();        // 開いている間は止めていたぶんを取り直す
+    refreshSafie();         // 開いている間は止めていたぶんを取り直す
   }
 
   document.getElementById('playerClose').onclick = closePlayer;
@@ -984,6 +984,59 @@ createCamplan().then(function (M) {
     });
   }
 
+  /* ---- モーション検知 ----
+
+     直近10分に動きのあったカメラの色を変える。図面の一部ではなく、
+     その場の状態なので保存されない（C++ 側も App が持っていて Document は
+     知らない）。サムネイルと同じ1分ごとのタイマーに相乗りする。
+
+     start / end はミリ秒。end は1分ほど過去でないと Safie に弾かれるので
+     （時計ずれ）、直近1分ぶんは次の回に回る。どのみち1分間隔なので実害はない。 */
+
+  var MOTION_WINDOW_MS = 10 * 60 * 1000;
+  var MOTION_LAG_MS = 60 * 1000;
+
+  // いまの階のカメラのうち、デバイスIDとAPIキーが揃っているものを集める
+  function camerasWithCredentials() {
+    var out = [];
+    var n = M._cp_camera_count();
+    for (var i = 0; i < n; i++) {
+      var no = M._cp_camera_number_at(i);
+      var pr = cameraProps(no);
+      if (pr.device_id && pr.api_key)
+        out.push({ no: no, deviceId: pr.device_id, apiKey: pr.api_key });
+    }
+    return out;
+  }
+
+  function fetchMotion(c) {
+    var end = Date.now() - MOTION_LAG_MS;
+    var start = end - MOTION_WINDOW_MS + MOTION_LAG_MS;
+    return loadSafieSdk().then(function () {
+      return Safie.Auth.setToken(c.apiKey, 'apiKey');
+    }).then(function () {
+      return Safie.Devices.queryStandardEvents({
+        deviceId: c.deviceId, start: start, end: end,
+        types: ['motion'], limit: 1
+      });
+    }).then(function (r) {
+      M._cp_set_motion(c.no, (r && r.total > 0) ? 1 : 0);
+    }).catch(function (err) {
+      // 取れなかったら「動きなし」に倒す。取れないことを赤で見せても困る。
+      M._cp_set_motion(c.no, 0);
+      console.warn('motion', c.deviceId, err && err.message || err);
+    });
+  }
+
+  function refreshMotion() {
+    if (player) return Promise.resolve();      // setToken を奪わない
+    var list = camerasWithCredentials();
+    if (!list.length) return Promise.resolve();
+    return list.reduce(function (chain, c) {
+      return chain.then(function () { return fetchMotion(c); });
+    }, Promise.resolve());
+  }
+
   function refreshThumbs() {
     if (thumbBusy || !viewLog.length) return Promise.resolve();
     // プレーヤーが開いている間は setToken を奪わない
@@ -998,9 +1051,13 @@ createCamplan().then(function (M) {
     }).catch(function () { thumbBusy = false; });
   }
 
+  function refreshSafie() {
+    return refreshThumbs().then(refreshMotion);
+  }
+
   function startThumbTimer() {
     if (thumbTimer) return;
-    thumbTimer = setInterval(refreshThumbs, THUMB_REFRESH_MS);
+    thumbTimer = setInterval(refreshSafie, THUMB_REFRESH_MS);
   }
 
   function pushHistory(no, props) {
@@ -1229,6 +1286,9 @@ createCamplan().then(function (M) {
       busy = false;
       renderNav();
       say('');
+      M._cp_clear_motion();   // 前の階のカメラの状態を持ち越さない
+      startThumbTimer();
+      refreshMotion();
     }).catch(function (e) {
       // 1つの階が読めないだけでリストごと消えると何が起きたか分からない
       if (!curBld) curBld = b;
@@ -1572,6 +1632,8 @@ createCamplan().then(function (M) {
   }
   M._cp_set_theme(0);
   initStorage();
+  // 最初の1回。以降は1分ごとのタイマーが回す。
+  setTimeout(function () { startThumbTimer(); refreshMotion(); }, 1200);
   initShare();
   // The demo plan, so the first visit has something to point cameras at.
   // A failure (file://, offline) just leaves the graph paper.
