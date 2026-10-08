@@ -210,6 +210,51 @@ with sync_playwright() as p:
     s2 = saved(pg)["sensors"][0]
     ck((s2["x1"] - s2["x0"]) > w0, "横が広がる: %.0f -> %.0f" % (w0, s2["x1"] - s2["x0"]))
 
+    print("== 8b. 重なったらカメラが前 ==")
+    # センサーは広い四角になるので、センサーが先に当たると中のカメラを
+    # 掴めなくなる。描画も当たり判定もカメラを前にする。
+    # この場で新しく置いて、座標が分かっている状態で試す。
+    pg.click("#m0")
+    pg.mouse.click(1150, 800)                # いったん選択を外す
+    pg.wait_for_timeout(500)
+    pg.click("#m4")
+    drag(pg, 300, 180, 700, 420)             # 大きめのセンサー
+    pg.wait_for_timeout(600)
+    pg.click("#m1")
+    pg.mouse.click(500, 300)                 # その真ん中にカメラ
+    pg.wait_for_timeout(700)
+    pg.click("#m0")
+    pg.mouse.click(1150, 800)
+    pg.wait_for_timeout(500)
+
+    pg.mouse.click(500, 300)                 # 重なっている場所
+    pg.wait_for_timeout(700)
+    ck(pg.eval_on_selector("#selBox", "e=>getComputedStyle(e).display") != "none",
+       "重なりではカメラが選ばれる")
+    ck(pg.eval_on_selector("#senBox", "e=>getComputedStyle(e).display") == "none",
+       "センサーのパネルは出ない")
+
+    pg.mouse.click(1150, 800)
+    pg.wait_for_timeout(400)
+    pg.mouse.click(350, 220)                 # センサーだけの場所
+    pg.wait_for_timeout(700)
+    ck(pg.eval_on_selector("#senBox", "e=>getComputedStyle(e).display") != "none",
+       "カメラから離れればセンサーが選べる")
+
+    print("== 8c. 消去もカメラが先 ==")
+    n_before = len(saved(pg).get("sensors", []))
+    cams_before = pg.eval_on_selector_all("#camList .chip", "e=>e.length")
+    pg.click("#m3")
+    pg.mouse.click(500, 300)                 # 重なっている場所
+    pg.wait_for_timeout(700)
+    ck(pg.eval_on_selector_all("#camList .chip", "e=>e.length") == cams_before - 1,
+       "カメラが消える")
+    ck(len(saved(pg).get("sensors", [])) == n_before, "センサーは残る")
+    pg.mouse.click(350, 220)                 # 続けて押せばセンサーも消える
+    pg.wait_for_timeout(700)
+    ck(len(saved(pg).get("sensors", [])) == n_before - 1, "もう一度でセンサーが消える")
+    pg.click("#m0")
+
     print("== 9. 消去モードで消える ==")
     pg.click("#m3")
     pg.mouse.click(700, 500)

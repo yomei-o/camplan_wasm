@@ -296,18 +296,8 @@ void App::mouseDown(float x, float y, int button) {
             if (near(eax, eay)) { pushHistory(); drag_ = Drag::fovHandleA; return; }
             if (near(ebx, eby)) { pushHistory(); drag_ = Drag::fovHandleB; return; }
         }
-        // 選択中のセンサーの角 - カメラのハンドルと同じく最前面
-        const int corner = hitSensorCorner(x, y);
-        if (corner >= 0) {
-            Sensor * s = selectedSensor();
-            pushHistory();
-            // 掴んだ角の対角は動かさない
-            sensorAnchorX_ = (corner == 0 || corner == 3) ? s->x1 : s->x0;
-            sensorAnchorY_ = (corner == 0 || corner == 1) ? s->y1 : s->y0;
-            sensorCorner_ = corner;
-            drag_ = Drag::sensorCorner;
-            return;
-        }
+        // カメラが先。センサーは広い四角になるので、センサーを先に当てると
+        // その中のカメラを掴めなくなる（描画も同じ順で、カメラが上に出る）。
         const int hit = hitCamera(wx, wy);
         if (hit >= 0) {
             pushHistory();
@@ -317,6 +307,18 @@ void App::mouseDown(float x, float y, int button) {
             grabDX_ = doc.cameras[hit].x - wx;
             grabDY_ = doc.cameras[hit].y - wy;
             dirty_ = true;
+            return;
+        }
+        // 選択中のセンサーの角。カメラの下、センサー本体の上。
+        const int corner = hitSensorCorner(x, y);
+        if (corner >= 0) {
+            Sensor * s = selectedSensor();
+            pushHistory();
+            // 掴んだ角の対角は動かさない
+            sensorAnchorX_ = (corner == 0 || corner == 3) ? s->x1 : s->x0;
+            sensorAnchorY_ = (corner == 0 || corner == 1) ? s->y1 : s->y0;
+            sensorCorner_ = corner;
+            drag_ = Drag::sensorCorner;
             return;
         }
         const int sh = hitSensor(wx, wy);
@@ -540,21 +542,22 @@ void App::finishWall() {
 }
 
 void App::eraseAt(float wx, float wy) {
-    const int sh = hitSensor(wx, wy);
-    if (sh >= 0) {
-        pushHistory();
-        doc.sensors.erase(doc.sensors.begin() + sh);
-        if (selSensor_ == sh) selSensor_ = -1;
-        else if (selSensor_ > sh) selSensor_--;
-        dirty_ = true;
-        return;
-    }
+    // カメラが先。センサーの上に乗っているカメラが消せなくなるため。
     const int hit = hitCamera(wx, wy);
     if (hit >= 0) {
         pushHistory();
         doc.cameras.erase(doc.cameras.begin() + hit);
         if (selected_ == hit) selected_ = -1;
         else if (selected_ > hit) selected_--;
+        dirty_ = true;
+        return;
+    }
+    const int sh = hitSensor(wx, wy);
+    if (sh >= 0) {
+        pushHistory();
+        doc.sensors.erase(doc.sensors.begin() + sh);
+        if (selSensor_ == sh) selSensor_ = -1;
+        else if (selSensor_ > sh) selSensor_--;
         dirty_ = true;
         return;
     }
