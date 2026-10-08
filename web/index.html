@@ -88,6 +88,48 @@
   #shareMsg.ok { color: var(--cyan); }
   #roTag { color: #ffcf6b; font-size: 12px; }
   main { flex: 1; display: flex; min-height: 0; }
+  /* 視聴履歴。さっき見たカメラにすぐ戻れるように左へ出す */
+  #histPane {
+    width: 184px;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    padding: 12px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  #histList .item {
+    margin-bottom: 10px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 2px;
+  }
+  #histList .item:hover { border-color: var(--cyan-dim); }
+  #histList .shot {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    display: block;
+    background: #061020;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  #histList .shot.none {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  #histList .cap {
+    font-size: 11px;
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #histList .when { font-size: 10px; color: var(--muted); }
+  #histNone { color: var(--muted); font-size: 12px; line-height: 1.6; }
   #stage { flex: 1; position: relative; min-width: 0; }
   #stage canvas { position: absolute; inset: 0; outline: none; }
   #stage.dropping::after {
@@ -259,6 +301,11 @@
   <span id="roTag" style="display:none">閲覧のみ（一時URL）</span>
 </header>
 <main>
+  <aside id="histPane">
+    <h2>視聴履歴</h2>
+    <div id="histList"></div>
+    <div id="histNone">カメラをダブルクリックすると、ここに履歴が残ります。</div>
+  </aside>
   <div id="stage"><canvas id="view" tabindex="0"></canvas></div>
   <aside>
     <div id="navBox" style="display:none">
@@ -708,6 +755,7 @@ createCamplan().then(function (M) {
     playerWrap.style.display = 'none';
     playerMsg.textContent = '';
     playerMsg.className = '';
+    refreshThumbs();        // 開いている間は止めていたぶんを取り直す
   }
 
   document.getElementById('playerClose').onclick = closePlayer;
@@ -715,10 +763,130 @@ createCamplan().then(function (M) {
     if (e.target === playerWrap) closePlayer();   // 外側をクリックで閉じる
   });
 
+  /* ---- 視聴履歴 ----
+
+     見たカメラを新しい順に並べる。文字だけだとどれがどれだか分からないので、
+     デバイスIDとAPIキーが揃っていればサムネイルを出す。SDK の
+     Devices.queryThumbnail は Blob を返すので objectURL にして貼る。
+
+     Safie.Auth.setToken は SDK 全体で1つしかないため、カメラごとに
+     APIキーが違う場合に備えて1件ずつ順番に取る。プレーヤーを開いている間は
+     そのトークンを奪わないように更新を止める。                        */
+
+  var HIST_MAX = 20;
+  var THUMB_REFRESH_MS = 60000;      // 1分ごとに撮り直す
+  var viewLog = [];                  // 新しい順 [{no, name, deviceId, apiKey, at, url}]
+  var histList = document.getElementById('histList');
+  var histNone = document.getElementById('histNone');
+  var thumbTimer = null;
+  var thumbBusy = false;
+
+  function hhmm(t) {
+    var d2 = new Date(t);
+    return ('0' + d2.getHours()).slice(-2) + ':' + ('0' + d2.getMinutes()).slice(-2);
+  }
+
+  function renderHistory() {
+    histNone.style.display = viewLog.length ? 'none' : '';
+    histList.innerHTML = '';
+    viewLog.forEach(function (e) {
+      var item = document.createElement('div');
+      item.className = 'item';
+      item.title = 'もう一度見る';
+      if (e.url) {
+        var img = document.createElement('img');
+        img.className = 'shot';
+        img.src = e.url;
+        img.alt = '';
+        item.appendChild(img);
+      } else {
+        var box = document.createElement('div');
+        box.className = 'shot none';
+        box.textContent = e.deviceId ? '取得中…' : '画像なし';
+        item.appendChild(box);
+      }
+      var cap = document.createElement('div');
+      cap.className = 'cap';
+      cap.textContent = 'カメラ ' + e.no + (e.name ? ' ' + e.name : '');
+      var when = document.createElement('div');
+      when.className = 'when';
+      when.textContent = hhmm(e.at);
+      item.appendChild(cap);
+      item.appendChild(when);
+      item.onclick = function () {
+        openPlayer(e.no, { device_id: e.deviceId, api_key: e.apiKey, name: e.name });
+      };
+      histList.appendChild(item);
+    });
+  }
+
+  function dropEntry(e) {
+    if (e.url) { URL.revokeObjectURL(e.url); e.url = ''; }
+  }
+
+  // 1件ぶんのサムネイルを取り直す。失敗しても前の絵を残す（消すと目印が減る）。
+  function fetchThumb(e) {
+    if (!e.deviceId || !e.apiKey) return Promise.resolve();
+    return loadSafieSdk().then(function () {
+      return Safie.Auth.setToken(e.apiKey, 'apiKey');
+    }).then(function () {
+      return Safie.Devices.queryThumbnail({ deviceId: e.deviceId });
+    }).then(function (blob) {
+      if (!blob) return;
+      if (viewLog.indexOf(e) < 0) return;      // 取っている間に消えた
+      dropEntry(e);
+      e.url = URL.createObjectURL(blob);
+    }).catch(function (err) {
+      console.warn('thumbnail', e.deviceId, err && err.message || err);
+    });
+  }
+
+  function refreshThumbs() {
+    if (thumbBusy || !viewLog.length) return Promise.resolve();
+    // プレーヤーが開いている間は setToken を奪わない
+    if (player) return Promise.resolve();
+    thumbBusy = true;
+    var list = viewLog.slice();
+    return list.reduce(function (chain, e) {
+      return chain.then(function () { return fetchThumb(e); });
+    }, Promise.resolve()).then(function () {
+      thumbBusy = false;
+      renderHistory();
+    }).catch(function () { thumbBusy = false; });
+  }
+
+  function startThumbTimer() {
+    if (thumbTimer) return;
+    thumbTimer = setInterval(refreshThumbs, THUMB_REFRESH_MS);
+  }
+
+  function pushHistory(no, props) {
+    var deviceId = props.device_id || '';
+    // 同じカメラは積み上げず、先頭へ移す
+    var found = null;
+    viewLog = viewLog.filter(function (e) {
+      var same = deviceId ? e.deviceId === deviceId : e.no === no;
+      if (same) found = e;
+      return !same;
+    });
+    var entry = found || { no: no, deviceId: deviceId, url: '' };
+    entry.no = no;
+    entry.name = props.name || '';
+    entry.apiKey = props.api_key || '';
+    entry.at = Date.now();
+    viewLog.unshift(entry);
+    while (viewLog.length > HIST_MAX) dropEntry(viewLog.pop());
+    renderHistory();
+    startThumbTimer();
+    // ここでは取りに行かない。直後にプレーヤーが setToken するので、
+    // カメラごとにキーが違うと取り合いになる。閉じたときとタイマーで拾う。
+  }
+
   function openPlayer(no, props) {
     var deviceId = props.device_id || '';
     var apiKey = props.api_key || '';
     var name = props.name || '';
+    pushHistory(no, props);
     stopPlayer();
     playerWrap.style.display = 'flex';
     playerTitle.textContent = 'カメラ ' + no + (name ? ' - ' + name : '');
