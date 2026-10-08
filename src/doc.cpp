@@ -66,6 +66,8 @@ char Document::nextLabel() const {
 void Sensor::normalize() {
     if (x0 > x1) std::swap(x0, x1);
     if (y0 > y1) std::swap(y0, y1);
+    if (x1 - x0 < kMinSide) x1 = x0 + kMinSide;
+    if (y1 - y0 < kMinSide) y1 = y0 + kMinSide;
 }
 
 bool Sensor::contains(float wx, float wy) const {

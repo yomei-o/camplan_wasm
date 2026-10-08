@@ -453,11 +453,35 @@ void App::mouseMove(float x, float y) {
     lastY_ = y;
 }
 
+namespace {
+// クリックだけで置いたときの大きさ。最小は Sensor::kMinSide が決める。
+const float kSensorDefaultW = 160.f;
+const float kSensorDefaultH = 110.f;
+}   // namespace
+
 void App::mouseUp(float x, float y, int button) {
+    // ドラッグせずに離したら既定の大きさ、気まぐれに潰したら最小の大きさ。
+    // 1ドットのエリアは当たり判定に入らず、選ぶことも消すこともできなくなる。
+    if (button == 0 &&
+        (drag_ == Drag::newSensor || drag_ == Drag::sensorCorner)) {
+        if (Sensor * s = selectedSensor()) {
+            const bool fresh = drag_ == Drag::newSensor;
+            if (fresh && s->w() < Sensor::kMinSide)
+                s->x1 = s->x0 + kSensorDefaultW;
+            if (fresh && s->h() < Sensor::kMinSide)
+                s->y1 = s->y0 + kSensorDefaultH;
+            s->normalize();       // 角を潰した場合はここが最小まで押し戻す
+            dirty_ = true;
+        }
+    }
     // Placing a camera is one gesture; the next click almost always wants to
     // adjust something, so the tool snaps back to select by itself.
     if (button == 0 && mode_ == Mode::addCamera &&
         drag_ == Drag::aimHandle) {
+        mode_ = Mode::select;
+        dirty_ = true;
+    }
+    if (button == 0 && mode_ == Mode::addSensor && drag_ == Drag::newSensor) {
         mode_ = Mode::select;
         dirty_ = true;
     }

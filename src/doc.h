@@ -55,7 +55,13 @@ struct Sensor : PropBag {
     // (DejaVu Sans) has no Japanese, so the drawing can only carry the letter.
     char label = 'A';
 
-    void normalize();                        // swaps the corners if needed
+    // Smaller than this and there is nothing to click: the area cannot be
+    // selected or erased, so it can never exist.  World units.
+    static constexpr float kMinSide = 24.f;
+
+    // Puts the corners in order and refuses to be too small.  Loading runs
+    // this too, so a file written before the rule existed gets repaired.
+    void normalize();
     bool contains(float wx, float wy) const;
     float w() const { return x1 - x0; }
     float h() const { return y1 - y0; }

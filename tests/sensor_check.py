@@ -81,6 +81,26 @@ with sync_playwright() as p:
     ck(s.get("label") == "A", "記号は A から: %s" % s.get("label"))
     ck(pg.input_value("#senLabel") == "A", "パネルにも出る")
 
+    print("== 2a. ドラッグせずに離しても潰れない ==")
+    # 1ドットのエリアは当たり判定に入らず、選ぶことも消すこともできなくなる
+    pg.click("#m4")
+    pg.mouse.click(1050, 300)
+    pg.wait_for_timeout(700)
+    j = saved(pg)
+    s2 = j["sensors"][-1]
+    ck((s2["x1"] - s2["x0"]) > 24 and (s2["y1"] - s2["y0"]) > 24,
+       "既定の大きさになる: %.0f x %.0f" % (s2["x1"] - s2["x0"], s2["y1"] - s2["y0"]))
+    ck(pg.eval_on_selector("#m0", "e=>e.className").find("on") >= 0,
+       "置いたら選択モードに戻る")
+    # 消せることまで見る
+    pg.click("#m3")
+    pg.mouse.click(1050, 300)
+    pg.wait_for_timeout(700)
+    ck(len(saved(pg).get("sensors", [])) == 1, "ちゃんと消せる")
+    pg.click("#m0")
+    pg.mouse.click(600, 415)
+    pg.wait_for_timeout(600)
+
     print("== 2b. 2個目は B、記号は変えられる ==")
     pg.click("#m4")
     drag(pg, 820, 560, 980, 660)
@@ -231,7 +251,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(3500)
     j = json.loads(pg.evaluate("window.__kv.get('A社/1F')"))
     ck(len(j["sensors"]) == 1 and j["sensors"][0]["alert"] is True,
-       "赤の状態ごと読める: %s" % j["sensors"])
+       "赤の状態ごと読める: %s" % j["sensors"][0])
 
     box = pg.evaluate("""() => {
         const r = document.getElementById('view').getBoundingClientRect();
@@ -247,6 +267,39 @@ with sync_playwright() as p:
     ck(pg.eval_on_selector("#senState", "e=>e.textContent") == "異常（赤）",
        "赤のまま復元される")
 
+    ck(errs == [], "JS エラーなし %s" % errs)
+    ctx.close()
+
+    print("== 11b. 潰れたセンサーは読み込みで直す ==")
+    # 過去に作ってしまった 1 ドットのエリアは掴めない（選べないので消せない）。
+    # 読み込みのときに最小の大きさまで広げて救う。
+    BAD = KV + """
+    window.__kv.set('A社/1F', JSON.stringify({
+      app: 'camplan', version: 1, marker: 16, walls: [], cameras: [],
+      sensors: [{ x0: 100, y0: 80,  x1: 300, y1: 200 },
+                { x0: 500, y0: 500, x1: 500, y1: 500 },
+                { x0: 600, y0: 600, x1: 602, y1: 601 }]
+    }));
+    """
+    ctx = b.new_context(viewport={"width": 1500, "height": 900})
+    pg = ctx.new_page()
+    errs = []
+    pg.on("pageerror", lambda e: errs.append(str(e)))
+    pg.add_init_script(BAD)
+    pg.goto(URL, wait_until="load")
+    pg.wait_for_selector("#view", timeout=60000)
+    pg.wait_for_timeout(3500)
+    # 何か触れば自動保存が直したものを書き戻す
+    pg.evaluate("window.prompt = () => '9F'")
+    pg.click("#flrAdd")
+    pg.wait_for_timeout(2500)
+    pg.click("#flrList .row:has-text('1F')")
+    pg.wait_for_timeout(3000)
+    j2 = json.loads(pg.evaluate("window.__kv.get('A社/1F')"))
+    sizes = [(round(s["x1"] - s["x0"]), round(s["y1"] - s["y0"])) for s in j2["sensors"]]
+    ck(all(w >= 24 and h >= 24 for w, h in sizes),
+       "全部つかめる大きさになる: %s" % sizes)
+    ck(sizes[0] == (200, 120), "元から大きいものは変わらない: %s" % (sizes[0],))
     ck(errs == [], "JS エラーなし %s" % errs)
     ctx.close()
     b.close()
