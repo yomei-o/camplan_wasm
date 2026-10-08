@@ -161,7 +161,10 @@
   aside h2:first-child { margin-top: 0; }
   .props { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
   .props label { color: var(--muted); }
-  .props input[type=number] {
+  /* センサーの記号は type=text。番号と同じ見た目になるように両方を拾う
+     （[type=number] だけだと素通りして、背景が真っ白になる）。 */
+  .props input[type=number],
+  .props input[type=text] {
     width: 100%;
     background: #061020;
     color: var(--cyan);
